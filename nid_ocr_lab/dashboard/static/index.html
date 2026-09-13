@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NID OCR Lab</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>NID OCR Lab</h1>
+        <p>SmartScan output viewer</p>
+      </div>
+      <label class="search">
+        <span>Search</span>
+        <input id="search" type="search" placeholder="sample id or source">
+      </label>
+      <div class="stats">
+        <div><strong id="sampleCount">0</strong><span>samples</span></div>
+        <div><strong id="visibleCount">0</strong><span>visible</span></div>
+      </div>
+      <div id="sampleList" class="sample-list"></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <h2 id="sampleTitle">Select a sample</h2>
+          <p id="sampleMeta">Raw, mask, annotation, and filter variants will appear here.</p>
+        </div>
+        <div class="toolbar">
+          <button id="toggleOverlay" type="button" aria-pressed="true">Overlay</button>
+          <button id="fitMode" type="button" aria-pressed="true">Fit</button>
+        </div>
+      </header>
+
+      <section class="compare-grid">
+        <article class="viewer">
+          <div class="viewer-head">
+            <h3>Source</h3>
+            <select id="sourceSelect"></select>
+          </div>
+          <div class="image-stage">
+            <img id="sourceImage" alt="Source sample">
+            <canvas id="overlayCanvas"></canvas>
+          </div>
+        </article>
+
+        <article class="viewer">
+          <div class="viewer-head">
+            <h3>Filter</h3>
+            <select id="filterSelect">
+              <option value="original">Original</option>
+              <option value="enhance">Enhance</option>
+              <option value="deglare">Deglare</option>
+              <option value="matte">Matte</option>
+              <option value="super">Super</option>
+              <option value="edge">Edge</option>
+              <option value="gray">Gray</option>
+              <option value="threshold">Threshold</option>
+              <option value="mask_overlay">Mask Overlay</option>
+            </select>
+          </div>
+          <div class="image-stage filter-stage">
+            <img id="filterImage" alt="Filtered sample">
+          </div>
+        </article>
+      </section>
+
+      <section class="details">
+        <article>
+          <h3>Dataset Health</h3>
+          <pre id="healthDetails">{}</pre>
+        </article>
+        <article>
+          <h3>Files</h3>
+          <pre id="fileDetails">{}</pre>
+        </article>
+        <article>
+          <h3>Annotation</h3>
+          <pre id="annotationDetails">{}</pre>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

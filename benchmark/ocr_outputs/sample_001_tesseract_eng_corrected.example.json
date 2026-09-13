@@ -1,0 +1,28 @@
+{
+  "engine": "tesseract",
+  "language": "eng",
+  "preprocessing": "corrected",
+  "latency_ms": 120.5,
+  "blocks": [
+    {
+      "text": "Name: RAHIM UDDIN",
+      "confidence": 0.88,
+      "bounding_box": {
+        "x": 0.25,
+        "y": 0.20,
+        "width": 0.35,
+        "height": 0.05
+      }
+    },
+    {
+      "text": "Date of Birth: 1990-01-31",
+      "confidence": 0.92
+    },
+    {
+      "text": "ID NO 1234567890",
+      "confidence": 0.95
+    }
+  ],
+  "full_text": "Name: RAHIM UDDIN\nDate of Birth: 1990-01-31\nID NO 1234567890"
+}
+

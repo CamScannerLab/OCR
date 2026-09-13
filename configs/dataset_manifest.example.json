@@ -1,0 +1,28 @@
+{
+  "samples": [
+    {
+      "id": "sample_001",
+      "nid_version": "smart",
+      "tags": ["synthetic", "normal_light", "corrected"],
+      "images": {
+        "corrected": "benchmark/datasets/synthetic/sample_001_corrected.jpg",
+        "enhance": "benchmark/datasets/synthetic/sample_001_enhance.jpg",
+        "deglare": "benchmark/datasets/synthetic/sample_001_deglare.jpg",
+        "matte": "benchmark/datasets/synthetic/sample_001_matte.jpg"
+      },
+      "ground_truth": {
+        "nid_number": "1234567890",
+        "name_bangla": "রহিম উদ্দিন",
+        "name_english": "RAHIM UDDIN",
+        "father_name_bangla": "করিম উদ্দিন",
+        "father_name_english": "KARIM UDDIN",
+        "mother_name_bangla": "আমিনা বেগম",
+        "mother_name_english": "AMINA BEGUM",
+        "date_of_birth": "1990-01-31",
+        "address_bangla": "ঢাকা",
+        "address_english": "DHAKA"
+      }
+    }
+  ]
+}
+
