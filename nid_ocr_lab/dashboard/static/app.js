@@ -4,6 +4,7 @@ const state = {
   selected: null,
   annotation: null,
   health: null,
+  ocrStatus: null,
   overlay: true,
   fit: true,
 };
@@ -22,6 +23,15 @@ const overlayCanvas = document.querySelector("#overlayCanvas");
 const healthDetails = document.querySelector("#healthDetails");
 const fileDetails = document.querySelector("#fileDetails");
 const annotationDetails = document.querySelector("#annotationDetails");
+const ocrEngineSelect = document.querySelector("#ocrEngineSelect");
+const ocrLanguageSelect = document.querySelector("#ocrLanguageSelect");
+const ocrRotationSelect = document.querySelector("#ocrRotationSelect");
+const runOcrButton = document.querySelector("#runOcrButton");
+const ocrStatus = document.querySelector("#ocrStatus");
+const ocrSummaryOutput = document.querySelector("#ocrSummaryOutput");
+const parsedFieldsOutput = document.querySelector("#parsedFieldsOutput");
+const rawTextOutput = document.querySelector("#rawTextOutput");
+const ocrJsonOutput = document.querySelector("#ocrJsonOutput");
 const toggleOverlay = document.querySelector("#toggleOverlay");
 const fitMode = document.querySelector("#fitMode");
 
@@ -30,13 +40,32 @@ async function boot() {
   state.samples = await response.json();
   const healthResponse = await fetch("/api/health");
   state.health = await healthResponse.json();
+  const ocrStatusResponse = await fetch("/api/ocr/status");
+  state.ocrStatus = await ocrStatusResponse.json();
   state.filtered = state.samples;
   sampleCount.textContent = state.samples.length;
   healthDetails.textContent = JSON.stringify(state.health, null, 2);
+  renderOcrStatus();
   renderList();
   if (state.samples.length) {
     selectSample(state.samples[0].id);
   }
+}
+
+function renderOcrStatus() {
+  const engine = state.ocrStatus?.engines?.find((item) => item.id === ocrEngineSelect.value);
+  if (!engine) {
+    ocrStatus.textContent = "No OCR engine selected.";
+    runOcrButton.disabled = true;
+    return;
+  }
+  if (!engine.available) {
+    ocrStatus.textContent = `${engine.label} is not installed or not on PATH.`;
+    runOcrButton.disabled = true;
+    return;
+  }
+  ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language packs found`;
+  runOcrButton.disabled = false;
 }
 
 function renderList() {
@@ -250,6 +279,8 @@ sourceSelect.addEventListener("change", updateImages);
 filterSelect.addEventListener("change", updateImages);
 search.addEventListener("input", renderList);
 window.addEventListener("resize", drawOverlay);
+ocrEngineSelect.addEventListener("change", renderOcrStatus);
+runOcrButton.addEventListener("click", runOcr);
 
 toggleOverlay.addEventListener("click", () => {
   state.overlay = !state.overlay;
@@ -267,3 +298,103 @@ fitMode.addEventListener("click", () => {
 });
 
 boot();
+
+async function runOcr() {
+  if (!state.selected?.annotation) {
+    setOcrMessage("No annotation quad is available for this sample.");
+    return;
+  }
+  const mode = filterSelect.value === "mask_overlay" ? "enhance" : filterSelect.value;
+  setOcrMessage("Running OCR...");
+  runOcrButton.disabled = true;
+  try {
+    const response = await fetch("/api/ocr/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        engine: ocrEngineSelect.value,
+        language: ocrLanguageSelect.value,
+        rotation: ocrRotationSelect.value,
+        mode,
+        image_path: cropBaseImagePath(),
+        annotation_path: state.selected.annotation,
+        sample_id: state.selected.id,
+      }),
+    });
+    const result = await response.json();
+    if (!result.ok) {
+      setOcrMessage(result.error || "OCR failed.");
+      return;
+    }
+    renderOcrResult(result);
+  } catch (error) {
+    setOcrMessage(`OCR request failed: ${error}`);
+  } finally {
+    renderOcrStatus();
+  }
+}
+
+function setOcrMessage(message) {
+  ocrSummaryOutput.innerHTML = `<span class="chip muted">${escapeHtml(message)}</span>`;
+  parsedFieldsOutput.innerHTML = "";
+  rawTextOutput.textContent = "";
+  ocrJsonOutput.textContent = "{}";
+}
+
+function renderOcrResult(result) {
+  ocrSummaryOutput.innerHTML = formatOcrSummary(result);
+  parsedFieldsOutput.innerHTML = formatParsedFields(result.parsed || {});
+  rawTextOutput.textContent = result.parsed?.raw_text || result.ocr?.full_text || "";
+  ocrJsonOutput.textContent = JSON.stringify(result.ocr || {}, null, 2);
+}
+
+function formatOcrSummary(result) {
+  const candidates = (result.rotation_candidates || [])
+    .map((candidate) => `rot ${candidate.rotation}: ${candidate.score}`)
+    .join(" · ");
+  return [
+    chip(`Crop ${result.crop?.width} x ${result.crop?.height}`),
+    chip(result.crop?.mode || ""),
+    chip(`Rotation ${result.rotation}`),
+    chip(`${Math.round(result.ocr?.latency_ms || 0)} ms`),
+    chip(result.ocr?.engine || ""),
+    chip(result.ocr?.language || ""),
+    chip(candidates || "No rotation candidates", "wide"),
+  ].join("");
+}
+
+function formatParsedFields(parsed) {
+  const rows = [];
+  for (const key of Object.keys(parsed)) {
+    if (key === "raw_text") continue;
+    const value = parsed[key]?.value ?? "";
+    const empty = value === "";
+    rows.push(`
+      <div class="field-row ${empty ? "empty" : ""}">
+        <span>${escapeHtml(labelForField(key))}</span>
+        <strong>${escapeHtml(value || "Not found")}</strong>
+      </div>
+    `);
+  }
+  return rows.join("");
+}
+
+function labelForField(key) {
+  return key
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function chip(value, extraClass = "") {
+  return `<span class="chip ${extraClass}">${escapeHtml(String(value || ""))}</span>`;
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}

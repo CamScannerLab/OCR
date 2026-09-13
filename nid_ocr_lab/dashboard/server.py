@@ -3,14 +3,27 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import shutil
+import subprocess
+import tempfile
 from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from nid_ocr_lab.dashboard.filters import FILTER_MODES, render_image, render_mask_overlay, render_sdk_crop
+from PIL import Image
+
+from nid_ocr_lab.dashboard.filters import (
+    FILTER_MODES,
+    render_image,
+    render_mask_overlay,
+    render_sdk_crop,
+    save_sdk_crop,
+)
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
+from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
+from nid_ocr_lab.pipeline import OCRPipeline
 
 STATIC_DIR = Path(__file__).with_name("static")
 
@@ -26,6 +39,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json(self.samples())
         elif parsed.path == "/api/health":
             self.send_json(dataset_health())
+        elif parsed.path == "/api/ocr/status":
+            self.send_json(ocr_status())
         elif parsed.path == "/api/annotation":
             query = parse_qs(parsed.query)
             self.send_json(load_annotation(first(query, "path")) or {})
@@ -37,6 +52,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_sdk_crop(parsed.query)
         elif parsed.path.startswith("/static/"):
             self.send_static(parsed.path.removeprefix("/static/"))
+        else:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/ocr/run":
+            self.run_ocr()
         else:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
@@ -120,6 +142,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
         with suppress(BrokenPipeError, ConnectionResetError):
             self.wfile.write(data)
 
+    def run_ocr(self) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            result = run_tesseract_payload(payload)
+        except RuntimeError as exc:
+            self.send_json({"ok": False, "error": str(exc)})
+            return
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+            self.send_json({"ok": False, "error": f"OCR failed: {exc}"})
+            return
+        self.send_json({"ok": True, **result})
+
     def send_static(self, name: str) -> None:
         path = (STATIC_DIR / name).resolve()
         if not str(path).startswith(str(STATIC_DIR.resolve())) or not path.exists():
@@ -149,6 +184,151 @@ def first_quad_points(annotation: dict) -> list[list[float]] | None:
         if len(points) == 4:
             return points
     return None
+
+
+def ocr_status() -> dict:
+    tesseract_path = shutil.which("tesseract")
+    return {
+        "engines": [
+            {
+                "id": "tesseract",
+                "label": "Tesseract",
+                "available": bool(tesseract_path),
+                "binary": tesseract_path,
+                "languages": tesseract_languages() if tesseract_path else [],
+            }
+        ]
+    }
+
+
+def tesseract_languages() -> list[str]:
+    try:
+        completed = subprocess.run(
+            ["tesseract", "--list-langs"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return [line.strip() for line in completed.stdout.splitlines()[1:] if line.strip()]
+
+
+def run_tesseract_payload(payload: dict) -> dict:
+    if not shutil.which("tesseract"):
+        raise RuntimeError("Tesseract is not installed or is not on PATH.")
+
+    image_path = payload.get("image_path")
+    annotation_path = payload.get("annotation_path")
+    mode = payload.get("mode") or "enhance"
+    language = payload.get("language") or "eng+ben"
+    rotation = payload.get("rotation") or "auto"
+    if not image_path or not annotation_path:
+        raise ValueError("image_path and annotation_path are required")
+
+    annotation = load_annotation(annotation_path) or {}
+    points = first_quad_points(annotation)
+    if not points:
+        raise ValueError("No 4-point annotation quad found")
+
+    with tempfile.TemporaryDirectory(prefix="nid-ocr-dashboard-") as tmp:
+        crop_path = Path(tmp) / "sdk-crop.jpg"
+        crop_info = save_sdk_crop(image_path, points, crop_path, mode=mode)
+        ocr, selected_rotation, candidates = run_tesseract_with_rotation(
+            crop_path,
+            language=language,
+            mode=mode,
+            rotation=rotation,
+        )
+
+    parsed = OCRPipeline().parse_ocr_result(ocr)
+    return {
+        "crop": {
+            "width": crop_info.width,
+            "height": crop_info.height,
+            "mode": crop_info.mode,
+        },
+        "rotation": selected_rotation,
+        "rotation_candidates": candidates,
+        "ocr": ocr_result_to_json(ocr),
+        "parsed": nid_data_to_json(parsed),
+    }
+
+
+def run_tesseract_with_rotation(
+    crop_path: Path,
+    language: str,
+    mode: str,
+    rotation: str,
+) -> tuple[object, int, list[dict]]:
+    rotations = [0, 90, 180, 270] if rotation == "auto" else [int(rotation)]
+    engine = TesseractEngine()
+    best = None
+    candidates = []
+    for degrees in rotations:
+        rotated_path = crop_path.with_name(f"sdk-crop-rot{degrees}.jpg")
+        rotate_image(crop_path, rotated_path, degrees)
+        ocr = engine.recognize(
+            rotated_path,
+            language.split("+"),
+            preprocessing=f"sdk_crop_{mode}_rot{degrees}",
+        )
+        score = score_ocr_result(ocr)
+        candidates.append(
+            {
+                "rotation": degrees,
+                "score": round(score, 4),
+                "blocks": len(ocr.blocks),
+                "text_preview": ocr.full_text[:160],
+            }
+        )
+        if best is None or score > best[0]:
+            best = (score, degrees, ocr)
+    assert best is not None
+    return best[2], best[1], candidates
+
+
+def rotate_image(source: Path, target: Path, degrees: int) -> None:
+    with Image.open(source) as image:
+        if degrees == 0:
+            image.save(target, format="JPEG", quality=92, optimize=True)
+            return
+        image.rotate(-degrees, expand=True).save(target, format="JPEG", quality=92, optimize=True)
+
+
+def score_ocr_result(ocr: object) -> float:
+    import re
+
+    confidences = [block.confidence for block in ocr.blocks if block.confidence is not None]
+    confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    text = ocr.full_text
+    lower = text.lower()
+    score = confidence
+    score += min(len(ocr.blocks), 30) * 0.01
+    if re.search(r"\b\d{10,17}\b", text):
+        score += 0.35
+    if re.search(r"\d{1,2}\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\-|/)", lower):
+        score += 0.20
+    for keyword in ("bangladesh", "government", "name", "date", "birth", "id", "জাতীয়", "নাম", "পিতা", "মাতা"):
+        if keyword in lower or keyword in text:
+            score += 0.08
+    return score
+
+
+def nid_data_to_json(result: object) -> dict:
+    output = {"raw_text": result.raw_text}
+    for key, value in result.__dict__.items():
+        if key == "raw_text":
+            continue
+        output[key] = {
+            "raw_value": value.raw_value,
+            "corrected_value": value.corrected_value,
+            "value": value.value,
+            "confidence": value.confidence,
+            "needs_review": value.needs_review,
+            "source": value.source,
+        }
+    return output
 
 
 def main() -> None:

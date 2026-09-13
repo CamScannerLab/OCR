@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from math import hypot, sqrt
+from pathlib import Path
 
 try:
     import cv2
@@ -75,6 +76,23 @@ def render_sdk_crop(
     payload = BytesIO()
     output.save(payload, format="JPEG", quality=92, optimize=True)
     return payload.getvalue(), ImageInfo(width=output.width, height=output.height, mode=f"sdk_crop_{mode}")
+
+
+def save_sdk_crop(
+    image_path: str,
+    points: list[list[float]],
+    output_path: str | Path,
+    mode: str = "original",
+    target_aspect_ratio: float = 85.6 / 54.0,
+    output_max_pixels: int = 2_000_000,
+) -> ImageInfo:
+    image = Image.open(image_path).convert("RGB")
+    quad = order_quad(points)
+    cropped = perspective_correct(image, quad, target_aspect_ratio=target_aspect_ratio)
+    cropped = downscale_max_pixels(cropped, output_max_pixels)
+    output = apply_filter(cropped, mode)
+    output.save(output_path, format="JPEG", quality=92, optimize=True)
+    return ImageInfo(width=output.width, height=output.height, mode=f"sdk_crop_{mode}")
 
 
 def apply_filter(image: Image.Image, mode: str) -> Image.Image:

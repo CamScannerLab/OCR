@@ -2,6 +2,8 @@
 
 This workspace is the Bangladesh NID OCR R&D lab. It starts after SmartScan has already produced a card image variant.
 
+Read `Developer.md` first for the current runtime, dashboard, installed OCR tools, and SmartScan path assumptions.
+
 ## Upstream SmartScan R&D
 
 The SmartScan work that feeds this OCR phase lives in:
@@ -50,3 +52,18 @@ SmartScan raw/corrected/enhance/deglare/matte output
 
 Keep OCR experiments engine-agnostic. Compare Tesseract, PaddleOCR, RapidOCR/ONNX, and other candidates through the same output schema and field-level metrics.
 
+## Current Runtime Notes
+
+The dashboard launcher prefers:
+
+```text
+/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan/venv/bin/python
+```
+
+Tesseract is a Homebrew/system binary, not a venv package:
+
+```text
+/opt/homebrew/bin/tesseract
+```
+
+Available Tesseract languages include `eng`, `ben`, and `osd`.

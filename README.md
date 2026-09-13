@@ -13,6 +13,12 @@ SmartScan is already implemented as a separate R&D effort. Keep these projects a
 
 This OCR lab should consume SmartScan outputs rather than redoing the scanner layer.
 
+## Developer Guide
+
+Start here for setup, runtime, dashboard behavior, OCR status, installed tools, and handoff notes:
+
+[Developer.md](/Users/admin/Desktop/KSL_Projects/R&D/OCR/Developer.md)
+
 ## Current Boundary
 
 SmartScan is treated as the upstream image acquisition layer:
@@ -82,9 +88,12 @@ The dashboard reads from:
 
 - `/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan/dataset`
 - `/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan/baseline_masks`
+- `/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan/training/data`
 - `/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan-SDK/demo/src/main/assets`
 
 It provides Python approximations of the SDK filter modes: original, enhance, deglare, matte, and super, plus edge/gray/threshold views for OCR experiments.
+
+Normal filter choices in the dashboard crop/perspective-correct first, then apply the selected filter, matching the OCR input flow. Use `Mask Overlay` only for full-image annotation/mask QA.
 
 ## Layout
 
@@ -112,3 +121,5 @@ nid_ocr_lab/
   engines/
   parsers/
 ```
+
+For full setup and handoff details, see [Developer.md](/Users/admin/Desktop/KSL_Projects/R&D/OCR/Developer.md).
