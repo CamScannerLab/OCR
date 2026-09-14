@@ -404,7 +404,9 @@ function formatOcrSummary(result) {
     .join(" · ");
   const chips = [
     chip(`Image ${result.image?.width} x ${result.image?.height}`),
+    chip(`Source ${result.image?.source_name || "unknown"}`, "wide", result.image?.source_path || ""),
     chip(result.image?.mode || ""),
+    chip(result.image?.input_mode || ""),
     chip(`Rotation ${result.rotation}`),
   ];
   if (result.psm !== null && result.psm !== undefined) {
@@ -446,8 +448,9 @@ function labelForField(key) {
     .join(" ");
 }
 
-function chip(value, extraClass = "") {
-  return `<span class="chip ${extraClass}">${escapeHtml(String(value || ""))}</span>`;
+function chip(value, extraClass = "", title = "") {
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+  return `<span class="chip ${extraClass}"${titleAttr}>${escapeHtml(String(value || ""))}</span>`;
 }
 
 function escapeHtml(value) {
