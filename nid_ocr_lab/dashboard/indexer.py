@@ -13,9 +13,26 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SMART_SCAN_ROOT = Path("/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan")
 DEFAULT_ROOTS = [
     SMART_SCAN_ROOT / "dataset",
-    SMART_SCAN_ROOT / "baseline_masks",
     SMART_SCAN_ROOT / "training/data",
-    Path("/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan-SDK/demo/src/main/assets"),
+]
+
+DASHBOARD_IMAGE_DIRS = [
+    SMART_SCAN_ROOT / "dataset/composites/images",
+    SMART_SCAN_ROOT / "dataset/incoming/_done",
+    SMART_SCAN_ROOT / "dataset/incoming/_preview",
+    SMART_SCAN_ROOT / "dataset/incoming/_review2",
+    SMART_SCAN_ROOT / "dataset/new_dataset/_done",
+    SMART_SCAN_ROOT / "dataset/new_dataset/_preview",
+    SMART_SCAN_ROOT / "dataset/overlays",
+    SMART_SCAN_ROOT / "dataset/raw",
+    SMART_SCAN_ROOT / "training/data/train/images",
+    SMART_SCAN_ROOT / "training/data/val/images",
+]
+
+DASHBOARD_ANNOTATION_DIRS = [
+    SMART_SCAN_ROOT / "dataset/annotations",
+    SMART_SCAN_ROOT / "dataset/incoming/_done",
+    SMART_SCAN_ROOT / "dataset/new_dataset/_done",
 ]
 
 
@@ -107,12 +124,29 @@ def dimension_check(
 
 def index_root(root: Path, samples: dict[str, Sample]) -> None:
     for path in root.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or not should_include_dashboard_file(path):
             continue
         if path.suffix.lower() == ".json":
             attach_annotation(path, samples)
         elif path.suffix.lower() in IMAGE_EXTENSIONS:
             attach_image(path, samples)
+
+
+def should_include_dashboard_file(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        return any(is_relative_to(path, directory) for directory in DASHBOARD_IMAGE_DIRS)
+    if suffix == ".json":
+        return any(is_relative_to(path, directory) for directory in DASHBOARD_ANNOTATION_DIRS)
+    return False
+
+
+def is_relative_to(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def attach_annotation(path: Path, samples: dict[str, Sample]) -> None:
