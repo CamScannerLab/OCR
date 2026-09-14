@@ -22,6 +22,7 @@ def main() -> None:
     tess_parser.add_argument("image", type=Path)
     tess_parser.add_argument("--lang", default="eng", help="Tesseract language string, for example eng, ben, or eng+ben")
     tess_parser.add_argument("--preprocessing", default=None)
+    tess_parser.add_argument("--psm", type=int, default=None)
     tess_parser.add_argument("--output", type=Path, default=None)
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate OCR JSON outputs against a dataset manifest")
@@ -34,7 +35,12 @@ def main() -> None:
         print(json.dumps(nid_data_to_json(result), indent=2, ensure_ascii=False))
     elif args.command == "ocr-tesseract":
         languages = args.lang.split("+")
-        result = TesseractEngine().recognize(args.image, languages, preprocessing=args.preprocessing)
+        result = TesseractEngine().recognize(
+            args.image,
+            languages,
+            preprocessing=args.preprocessing,
+            psm=args.psm,
+        )
         payload = ocr_result_to_json(result)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

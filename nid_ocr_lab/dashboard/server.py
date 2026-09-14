@@ -19,10 +19,12 @@ from nid_ocr_lab.dashboard.filters import (
     render_image,
     render_mask_overlay,
     render_sdk_crop,
+    save_filtered_image,
     save_sdk_crop,
 )
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
+from nid_ocr_lab.models import OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -146,7 +148,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-            result = run_tesseract_payload(payload)
+            result = run_ocr_payload(payload)
         except RuntimeError as exc:
             self.send_json({"ok": False, "error": str(exc)})
             return
@@ -164,6 +166,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         with suppress(BrokenPipeError, ConnectionResetError):
@@ -214,41 +217,47 @@ def tesseract_languages() -> list[str]:
     return [line.strip() for line in completed.stdout.splitlines()[1:] if line.strip()]
 
 
-def run_tesseract_payload(payload: dict) -> dict:
-    if not shutil.which("tesseract"):
-        raise RuntimeError("Tesseract is not installed or is not on PATH.")
-
+def run_ocr_payload(payload: dict) -> dict:
+    engine = payload.get("engine") or "tesseract"
     image_path = payload.get("image_path")
     annotation_path = payload.get("annotation_path")
     mode = payload.get("mode") or "enhance"
     language = payload.get("language") or "eng+ben"
     rotation = payload.get("rotation") or "auto"
-    if not image_path or not annotation_path:
-        raise ValueError("image_path and annotation_path are required")
-
-    annotation = load_annotation(annotation_path) or {}
-    points = first_quad_points(annotation)
-    if not points:
-        raise ValueError("No 4-point annotation quad found")
+    if not image_path:
+        raise ValueError("image_path is required")
 
     with tempfile.TemporaryDirectory(prefix="nid-ocr-dashboard-") as tmp:
-        crop_path = Path(tmp) / "sdk-crop.jpg"
-        crop_info = save_sdk_crop(image_path, points, crop_path, mode=mode)
-        ocr, selected_rotation, candidates = run_tesseract_with_rotation(
-            crop_path,
-            language=language,
-            mode=mode,
-            rotation=rotation,
-        )
+        filtered_path = Path(tmp) / "filtered.jpg"
+        input_mode = "filtered"
+        if annotation_path:
+            annotation = load_annotation(annotation_path) or {}
+            points = first_quad_points(annotation)
+            if not points:
+                raise ValueError("No 4-point annotation quad found")
+            image_info = save_sdk_crop(image_path, points, filtered_path, mode=mode)
+            input_mode = "filter_panel_crop"
+        else:
+            image_info = save_filtered_image(image_path, filtered_path, mode=mode)
+        if engine == "tesseract":
+            ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_tesseract_with_rotation(
+                filtered_path,
+                language=language,
+                mode=f"{input_mode}_{mode}",
+                rotation=rotation,
+            )
+        else:
+            raise ValueError(f"Unsupported OCR engine: {engine}")
 
-    parsed = OCRPipeline().parse_ocr_result(ocr)
+    parsed = OCRPipeline().parse_ocr_result(parse_ocr)
     return {
-        "crop": {
-            "width": crop_info.width,
-            "height": crop_info.height,
-            "mode": crop_info.mode,
+        "image": {
+            "width": image_info.width,
+            "height": image_info.height,
+            "mode": image_info.mode,
         },
         "rotation": selected_rotation,
+        "psm": selected_psm,
         "rotation_candidates": candidates,
         "ocr": ocr_result_to_json(ocr),
         "parsed": nid_data_to_json(parsed),
@@ -256,36 +265,71 @@ def run_tesseract_payload(payload: dict) -> dict:
 
 
 def run_tesseract_with_rotation(
-    crop_path: Path,
+    image_path: Path,
     language: str,
     mode: str,
     rotation: str,
-) -> tuple[object, int, list[dict]]:
+) -> tuple[OCRResult, int, int, list[dict], list[tuple[int, int, OCRResult]]]:
     rotations = [0, 90, 180, 270] if rotation == "auto" else [int(rotation)]
+    psm_candidates = [6, 11, 12, 3]
     engine = TesseractEngine()
     best = None
     candidates = []
+    candidate_ocrs = []
     for degrees in rotations:
-        rotated_path = crop_path.with_name(f"sdk-crop-rot{degrees}.jpg")
-        rotate_image(crop_path, rotated_path, degrees)
-        ocr = engine.recognize(
-            rotated_path,
-            language.split("+"),
-            preprocessing=f"sdk_crop_{mode}_rot{degrees}",
-        )
-        score = score_ocr_result(ocr)
-        candidates.append(
-            {
-                "rotation": degrees,
-                "score": round(score, 4),
-                "blocks": len(ocr.blocks),
-                "text_preview": ocr.full_text[:160],
-            }
-        )
-        if best is None or score > best[0]:
-            best = (score, degrees, ocr)
+        rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
+        rotate_image(image_path, rotated_path, degrees)
+        for psm in psm_candidates:
+            ocr = engine.recognize(
+                rotated_path,
+                language.split("+"),
+                preprocessing=f"filtered_{mode}_rot{degrees}_psm{psm}",
+                psm=psm,
+            )
+            score = score_ocr_result(ocr)
+            candidate_ocrs.append((degrees, psm, ocr))
+            candidates.append(
+                {
+                    "rotation": degrees,
+                    "psm": psm,
+                    "score": round(score, 4),
+                    "blocks": len(ocr.blocks),
+                    "text_preview": ocr.full_text[:160],
+                }
+            )
+            if best is None or score > best[0]:
+                best = (score, degrees, psm, ocr)
     assert best is not None
-    return best[2], best[1], candidates
+    selected = best[3]
+    return selected, best[1], best[2], candidates, combine_selected_rotation_ocr(selected, candidate_ocrs, best[1])
+
+
+def combine_selected_rotation_ocr(
+    selected: OCRResult,
+    candidates: list[tuple[int, int, OCRResult]],
+    selected_rotation: int,
+) -> OCRResult:
+    same_rotation = [ocr for degrees, _psm, ocr in candidates if degrees == selected_rotation]
+    if not same_rotation:
+        return selected
+    full_text = "\n".join(ocr.full_text for ocr in same_rotation if ocr.full_text)
+    blocks = []
+    for ocr in same_rotation:
+        blocks.extend(ocr.blocks)
+    metadata = dict(selected.metadata)
+    metadata["field_parse_sources"] = [
+        {"preprocessing": ocr.preprocessing, "psm": ocr.metadata.get("psm")}
+        for ocr in same_rotation
+    ]
+    return OCRResult(
+        blocks=blocks,
+        full_text=full_text,
+        engine=selected.engine,
+        language=selected.language,
+        preprocessing=f"{selected.preprocessing}_field_parse_union",
+        latency_ms=selected.latency_ms,
+        metadata=metadata,
+    )
 
 
 def rotate_image(source: Path, target: Path, degrees: int) -> None:
@@ -303,15 +347,31 @@ def score_ocr_result(ocr: object) -> float:
     confidence = sum(confidences) / len(confidences) if confidences else 0.0
     text = ocr.full_text
     lower = text.lower()
-    score = confidence
-    score += min(len(ocr.blocks), 30) * 0.01
+    words = [block.text for block in ocr.blocks if block.text]
+    digit_words = sum(1 for word in words if re.search(r"\d|[০-৯]", word))
+    low_confidence_words = sum(
+        1 for block in ocr.blocks if block.confidence is not None and block.confidence < 0.45
+    )
+    score = confidence * 0.50
+    score += min(len(ocr.blocks), 80) * 0.005
     if re.search(r"\b\d{10,17}\b", text):
-        score += 0.35
+        score += 1.50
+    if re.search(r"\b(?:ID|NID)\s*(?:NO|NUMBER)?\s*[:：]?\s*\d{8,17}\b", text, re.IGNORECASE):
+        score += 1.00
     if re.search(r"\d{1,2}\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\-|/)", lower):
-        score += 0.20
-    for keyword in ("bangladesh", "government", "name", "date", "birth", "id", "জাতীয়", "নাম", "পিতা", "মাতা"):
+        score += 0.80
+    if re.search(r"\d{1,2}\s+[a-z]{3,9}\.?,?\s+\d{4}", lower):
+        score += 0.90
+    for keyword in ("name", "date", "birth", "নাম", "পিতা", "মাতা", "জন্ম", "ঠিকানা"):
         if keyword in lower or keyword in text:
-            score += 0.08
+            score += 0.30
+    for header_keyword in ("bangladesh", "government", "জাতীয়", "গণপ্রজাতন্ত্রী", "সরকার"):
+        if header_keyword in lower or header_keyword in text:
+            score -= 0.05
+    if digit_words > 8:
+        score -= (digit_words - 8) * 0.12
+    if low_confidence_words > 8:
+        score -= (low_confidence_words - 8) * 0.04
     return score
 
 

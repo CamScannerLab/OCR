@@ -10,6 +10,45 @@ DATE_PATTERNS = [
     re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b"),
 ]
 
+MONTHS = {
+    "jan": "01",
+    "january": "01",
+    "feb": "02",
+    "february": "02",
+    "mar": "03",
+    "march": "03",
+    "apr": "04",
+    "april": "04",
+    "may": "05",
+    "jun": "06",
+    "june": "06",
+    "jul": "07",
+    "july": "07",
+    "aug": "08",
+    "august": "08",
+    "sep": "09",
+    "sept": "09",
+    "september": "09",
+    "oct": "10",
+    "october": "10",
+    "nov": "11",
+    "november": "11",
+    "dec": "12",
+    "december": "12",
+}
+
+MONTH_DATE_PATTERN = re.compile(
+    r"\b(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+
+NID_CONTEXT_PATTERN = re.compile(
+    r"\b(?:ID|NID)\s*(?:NO|NUMBER|নং)?\s*[:：]?\s*([0-9০-৯]{8,17})\b",
+    re.IGNORECASE,
+)
+
+BANGLA_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
 
 class NIDParser:
     """Initial text parser for R&D.
@@ -42,11 +81,27 @@ def normalize_space(value: str) -> str:
 
 
 def find_nid_number(text: str) -> FieldResult:
-    candidates = re.findall(r"\b\d{10,17}\b", text)
+    context_match = NID_CONTEXT_PATTERN.search(text)
+    if context_match:
+        return FieldResult(
+            raw_value=normalize_digits(context_match.group(1)),
+            confidence=0.90,
+            needs_review=False,
+            source="id-context-regex",
+        )
+    ascii_candidates = re.findall(r"\b[0-9]{10,17}\b", text)
+    if ascii_candidates:
+        value = max(ascii_candidates, key=lambda item: (len(item) == 10, len(item)))
+        return FieldResult(raw_value=value, confidence=0.85, needs_review=False, source="regex")
+    candidates = re.findall(r"\b[0-9০-৯]{10,17}\b", text)
     if not candidates:
         return empty_field()
-    value = max(candidates, key=len)
+    value = normalize_digits(max(candidates, key=len))
     return FieldResult(raw_value=value, confidence=0.85, needs_review=False, source="regex")
+
+
+def normalize_digits(value: str) -> str:
+    return value.translate(BANGLA_DIGITS)
 
 
 def find_date_of_birth(text: str) -> FieldResult:
@@ -54,6 +109,13 @@ def find_date_of_birth(text: str) -> FieldResult:
         match = pattern.search(text)
         if match:
             value = "-".join(part.zfill(2) for part in match.groups())
+            return FieldResult(raw_value=value, confidence=0.75, needs_review=False, source="regex")
+    match = MONTH_DATE_PATTERN.search(text)
+    if match:
+        day, month_name, year = match.groups()
+        month = MONTHS.get(month_name.lower().rstrip("."))
+        if month:
+            value = f"{year}-{month}-{day.zfill(2)}"
             return FieldResult(raw_value=value, confidence=0.75, needs_review=False, source="regex")
     return empty_field()
 
@@ -66,9 +128,38 @@ def find_labeled_value(lines: list[str], labels: list[str]) -> FieldResult:
             inline = value_after_separator(line)
             if inline:
                 return FieldResult(raw_value=inline, confidence=0.55, needs_review=True, source="label-inline")
-            if index + 1 < len(lines) and lines[index + 1]:
-                return FieldResult(raw_value=lines[index + 1], confidence=0.50, needs_review=True, source="label-next-line")
+            value = following_value(lines, index + 1)
+            if value:
+                return FieldResult(raw_value=value, confidence=0.50, needs_review=True, source="label-next-line")
     return empty_field()
+
+
+def following_value(lines: list[str], start: int) -> str | None:
+    values = []
+    stop_words = {
+        "date",
+        "birth",
+        "id",
+        "no",
+        "father",
+        "mother",
+        "address",
+        "নাম",
+        "পিতা",
+        "মাতা",
+        "ঠিকানা",
+    }
+    for line in lines[start : start + 4]:
+        value = normalize_space(line)
+        if not value:
+            continue
+        lower = value.lower().strip(":：")
+        if lower in stop_words:
+            break
+        if re.search(r"\d", value):
+            break
+        values.append(value)
+    return normalize_space(" ".join(values)) if values else None
 
 
 def value_after_separator(line: str) -> str | None:
@@ -77,4 +168,3 @@ def value_after_separator(line: str) -> str | None:
         return None
     value = normalize_space(parts[1])
     return value or None
-

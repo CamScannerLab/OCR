@@ -300,8 +300,9 @@ fitMode.addEventListener("click", () => {
 boot();
 
 async function runOcr() {
-  if (!state.selected?.annotation) {
-    setOcrMessage("No annotation quad is available for this sample.");
+  const imagePath = state.selected?.annotation ? cropBaseImagePath() : sourceSelect.value;
+  if (!imagePath) {
+    setOcrMessage("No image is selected.");
     return;
   }
   const mode = filterSelect.value === "mask_overlay" ? "enhance" : filterSelect.value;
@@ -316,8 +317,8 @@ async function runOcr() {
         language: ocrLanguageSelect.value,
         rotation: ocrRotationSelect.value,
         mode,
-        image_path: cropBaseImagePath(),
-        annotation_path: state.selected.annotation,
+        image_path: imagePath,
+        annotation_path: state.selected?.annotation || null,
         sample_id: state.selected.id,
       }),
     });
@@ -344,18 +345,22 @@ function setOcrMessage(message) {
 function renderOcrResult(result) {
   ocrSummaryOutput.innerHTML = formatOcrSummary(result);
   parsedFieldsOutput.innerHTML = formatParsedFields(result.parsed || {});
-  rawTextOutput.textContent = result.parsed?.raw_text || result.ocr?.full_text || "";
+  rawTextOutput.textContent = result.ocr?.full_text || result.parsed?.raw_text || "";
   ocrJsonOutput.textContent = JSON.stringify(result.ocr || {}, null, 2);
 }
 
 function formatOcrSummary(result) {
   const candidates = (result.rotation_candidates || [])
-    .map((candidate) => `rot ${candidate.rotation}: ${candidate.score}`)
+    .map((candidate) => {
+      const psm = candidate.psm === null || candidate.psm === undefined ? "" : ` psm ${candidate.psm}`;
+      return `rot ${candidate.rotation}${psm}: ${candidate.score}`;
+    })
     .join(" · ");
   return [
-    chip(`Crop ${result.crop?.width} x ${result.crop?.height}`),
-    chip(result.crop?.mode || ""),
+    chip(`Image ${result.image?.width} x ${result.image?.height}`),
+    chip(result.image?.mode || ""),
     chip(`Rotation ${result.rotation}`),
+    chip(`PSM ${result.psm ?? ""}`),
     chip(`${Math.round(result.ocr?.latency_ms || 0)} ms`),
     chip(result.ocr?.engine || ""),
     chip(result.ocr?.language || ""),
