@@ -23,6 +23,7 @@ from nid_ocr_lab.dashboard.filters import (
     save_sdk_crop,
 )
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
+from nid_ocr_lab.engines.paddleocr import PaddleOCREngine, is_available as paddleocr_available
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
 from nid_ocr_lab.models import OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
@@ -199,7 +200,15 @@ def ocr_status() -> dict:
                 "available": bool(tesseract_path),
                 "binary": tesseract_path,
                 "languages": tesseract_languages() if tesseract_path else [],
-            }
+            },
+            {
+                "id": "paddleocr",
+                "label": "PaddleOCR",
+                "available": paddleocr_available(),
+                "binary": "python package",
+                "languages": ["eng"],
+                "note": "Install paddleocr and paddlepaddle to enable.",
+            },
         ]
     }
 
@@ -241,6 +250,13 @@ def run_ocr_payload(payload: dict) -> dict:
             image_info = save_filtered_image(image_path, filtered_path, mode=mode)
         if engine == "tesseract":
             ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_tesseract_with_rotation(
+                filtered_path,
+                language=language,
+                mode=f"{input_mode}_{mode}",
+                rotation=rotation,
+            )
+        elif engine == "paddleocr":
+            ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_paddle_with_rotation(
                 filtered_path,
                 language=language,
                 mode=f"{input_mode}_{mode}",
@@ -302,6 +318,40 @@ def run_tesseract_with_rotation(
     assert best is not None
     selected = best[3]
     return selected, best[1], best[2], candidates, combine_selected_rotation_ocr(selected, candidate_ocrs, best[1])
+
+
+def run_paddle_with_rotation(
+    image_path: Path,
+    language: str,
+    mode: str,
+    rotation: str,
+) -> tuple[OCRResult, int, None, list[dict], OCRResult]:
+    rotations = [0, 90, 180, 270] if rotation == "auto" else [int(rotation)]
+    engine = PaddleOCREngine()
+    best = None
+    candidates = []
+    for degrees in rotations:
+        rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
+        rotate_image(image_path, rotated_path, degrees)
+        ocr = engine.recognize(
+            rotated_path,
+            language.split("+"),
+            preprocessing=f"filtered_{mode}_rot{degrees}",
+        )
+        score = score_ocr_result(ocr)
+        candidates.append(
+            {
+                "rotation": degrees,
+                "psm": None,
+                "score": round(score, 4),
+                "blocks": len(ocr.blocks),
+                "text_preview": ocr.full_text[:160],
+            }
+        )
+        if best is None or score > best[0]:
+            best = (score, degrees, ocr)
+    assert best is not None
+    return best[2], best[1], None, candidates, best[2]
 
 
 def combine_selected_rotation_ocr(

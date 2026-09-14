@@ -60,11 +60,11 @@ function renderOcrStatus() {
     return;
   }
   if (!engine.available) {
-    ocrStatus.textContent = `${engine.label} is not installed or not on PATH.`;
+    ocrStatus.textContent = engine.note || `${engine.label} is not installed or not on PATH.`;
     runOcrButton.disabled = true;
     return;
   }
-  ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language packs found`;
+  ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language options found`;
   runOcrButton.disabled = false;
 }
 

@@ -128,6 +128,9 @@ def find_labeled_value(lines: list[str], labels: list[str]) -> FieldResult:
             inline = value_after_separator(line)
             if inline:
                 return FieldResult(raw_value=inline, confidence=0.55, needs_review=True, source="label-inline")
+            previous = previous_value(lines, index - 1)
+            if previous:
+                return FieldResult(raw_value=previous, confidence=0.50, needs_review=True, source="label-previous-line")
             value = following_value(lines, index + 1)
             if value:
                 return FieldResult(raw_value=value, confidence=0.50, needs_review=True, source="label-next-line")
@@ -160,6 +163,38 @@ def following_value(lines: list[str], start: int) -> str | None:
             break
         values.append(value)
     return normalize_space(" ".join(values)) if values else None
+
+
+def previous_value(lines: list[str], index: int) -> str | None:
+    if index < 0:
+        return None
+    value = normalize_space(lines[index])
+    if not value or re.search(r"\d", value):
+        return None
+    lower = value.lower().strip(":：")
+    stop_words = {
+        "government",
+        "bangladesh",
+        "national",
+        "id",
+        "card",
+        "name",
+        "father",
+        "mother",
+        "address",
+        "গণপ্রজাতন্ত্রী",
+        "বাংলাদেশ",
+        "সরকার",
+        "জাতীয়",
+        "পরিচয়",
+        "পত্র",
+        "নাম",
+        "পিতা",
+        "মাতা",
+    }
+    if lower in stop_words:
+        return None
+    return value
 
 
 def value_after_separator(line: str) -> str | None:

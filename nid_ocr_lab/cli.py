@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nid_ocr_lab.engines.paddleocr import PaddleOCREngine
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
 from nid_ocr_lab.evaluation import evaluate_fields, summarize
 from nid_ocr_lab.models import BoundingBox, OCRResult, OCRTextBlock
@@ -25,6 +26,12 @@ def main() -> None:
     tess_parser.add_argument("--psm", type=int, default=None)
     tess_parser.add_argument("--output", type=Path, default=None)
 
+    paddle_parser = subparsers.add_parser("ocr-paddle", help="Run PaddleOCR and emit OCR JSON")
+    paddle_parser.add_argument("image", type=Path)
+    paddle_parser.add_argument("--lang", default="eng", help="Requested language string, for example eng or eng+ben")
+    paddle_parser.add_argument("--preprocessing", default=None)
+    paddle_parser.add_argument("--output", type=Path, default=None)
+
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate OCR JSON outputs against a dataset manifest")
     eval_parser.add_argument("ocr_output_dir", type=Path)
     eval_parser.add_argument("manifest", type=Path)
@@ -41,6 +48,15 @@ def main() -> None:
             preprocessing=args.preprocessing,
             psm=args.psm,
         )
+        payload = ocr_result_to_json(result)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+    elif args.command == "ocr-paddle":
+        languages = args.lang.split("+")
+        result = PaddleOCREngine().recognize(args.image, languages, preprocessing=args.preprocessing)
         payload = ocr_result_to_json(result)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
