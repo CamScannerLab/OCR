@@ -33,6 +33,19 @@ def render_image(path: str, mode: str = "original", max_width: int = 1800) -> tu
     return payload.getvalue(), ImageInfo(width=output.width, height=output.height, mode=mode)
 
 
+def save_filtered_image(
+    image_path: str,
+    output_path: str | Path,
+    mode: str = "original",
+    max_width: int = 1800,
+) -> ImageInfo:
+    image = Image.open(image_path).convert("RGB")
+    image.thumbnail((max_width, max_width * 2), Image.Resampling.LANCZOS)
+    output = apply_filter(image, mode)
+    output.save(output_path, format="JPEG", quality=92, optimize=True)
+    return ImageInfo(width=output.width, height=output.height, mode=mode)
+
+
 def render_mask_overlay(
     image_path: str,
     mask_path: str,
