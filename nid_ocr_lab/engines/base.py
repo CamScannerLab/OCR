@@ -14,6 +14,6 @@ class OCREngine(Protocol):
         image_path: Path,
         languages: list[str],
         preprocessing: str | None = None,
-        psm: int | None = None,
     ) -> OCRResult:
         """Recognize text from a SmartScan output image."""
+

@@ -1,7 +1,4 @@
 .DS_Store
-.env
-.env.*
-!.env.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -12,3 +9,4 @@ venv/
 benchmark/reports/*.json
 benchmark/reports/*.csv
 benchmark/generated/
+
