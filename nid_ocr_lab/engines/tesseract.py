@@ -45,7 +45,8 @@ class TesseractEngine(OCREngine):
             ]
             subprocess.run(command, check=True, capture_output=True, text=True)
             tsv_path = output_base.with_suffix(".tsv")
-            blocks = parse_tsv(tsv_path.read_text(encoding="utf-8", errors="replace"))
+            raw_tsv = tsv_path.read_text(encoding="utf-8", errors="replace")
+            blocks = parse_tsv(raw_tsv)
 
         latency_ms = (time.perf_counter() - started) * 1000
         full_text = "\n".join(block.text for block in blocks if block.text)
@@ -56,7 +57,7 @@ class TesseractEngine(OCREngine):
             language=language,
             preprocessing=preprocessing,
             latency_ms=latency_ms,
-            metadata={"source_image": str(image_path), "psm": psm},
+            metadata={"source_image": str(image_path), "psm": psm, "raw_response": raw_tsv},
         )
 
 

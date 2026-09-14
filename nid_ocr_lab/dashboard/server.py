@@ -23,9 +23,11 @@ from nid_ocr_lab.dashboard.filters import (
     save_sdk_crop,
 )
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
+from nid_ocr_lab.engines.gemini_vision import GeminiVisionEngine, status as gemini_status
+from nid_ocr_lab.engines.lmstudio_vision import LMStudioVisionEngine, status as lmstudio_status
 from nid_ocr_lab.engines.paddleocr import PaddleOCREngine, is_available as paddleocr_available
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
-from nid_ocr_lab.models import OCRResult
+from nid_ocr_lab.models import FIELD_NAMES, FieldResult, NIDData, OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -192,6 +194,8 @@ def first_quad_points(annotation: dict) -> list[list[float]] | None:
 
 def ocr_status() -> dict:
     tesseract_path = shutil.which("tesseract")
+    lmstudio = lmstudio_status()
+    gemini = gemini_status()
     return {
         "engines": [
             {
@@ -208,6 +212,26 @@ def ocr_status() -> dict:
                 "binary": "python package",
                 "languages": ["eng"],
                 "note": "Install paddleocr and paddlepaddle to enable.",
+            },
+            {
+                "id": "lmstudio_vision",
+                "label": "LM Studio Vision",
+                "available": lmstudio["available"],
+                "binary": lmstudio["base_url"],
+                "languages": ["vision"],
+                "model": lmstudio["model"],
+                "models": lmstudio["models"],
+                "note": lmstudio["note"],
+            },
+            {
+                "id": "gemini_vision",
+                "label": "Gemini Vision",
+                "available": gemini["available"],
+                "binary": gemini["base_url"],
+                "languages": ["vision"],
+                "model": gemini["model"],
+                "models": gemini["models"],
+                "note": gemini["note"],
             },
         ]
     }
@@ -233,6 +257,7 @@ def run_ocr_payload(payload: dict) -> dict:
     mode = payload.get("mode") or "enhance"
     language = payload.get("language") or "eng+ben"
     rotation = payload.get("rotation") or "auto"
+    selected_model = payload.get("model") or None
     if not image_path:
         raise ValueError("image_path is required")
 
@@ -255,6 +280,7 @@ def run_ocr_payload(payload: dict) -> dict:
                 mode=f"{input_mode}_{mode}",
                 rotation=rotation,
             )
+            parsed = OCRPipeline().parse_ocr_result(parse_ocr)
         elif engine == "paddleocr":
             ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_paddle_with_rotation(
                 filtered_path,
@@ -262,10 +288,26 @@ def run_ocr_payload(payload: dict) -> dict:
                 mode=f"{input_mode}_{mode}",
                 rotation=rotation,
             )
+            parsed = OCRPipeline().parse_ocr_result(parse_ocr)
+        elif engine == "lmstudio_vision":
+            ocr, selected_rotation, selected_psm, candidates, fields = run_lmstudio_vision(
+                filtered_path,
+                mode=f"{input_mode}_{mode}",
+                rotation=rotation,
+                selected_model=selected_model,
+            )
+            parsed = nid_data_from_vision_fields(fields, raw_text=ocr.full_text, source="lmstudio_vision")
+        elif engine == "gemini_vision":
+            ocr, selected_rotation, selected_psm, candidates, fields = run_gemini_vision(
+                filtered_path,
+                mode=f"{input_mode}_{mode}",
+                rotation=rotation,
+                selected_model=selected_model,
+            )
+            parsed = nid_data_from_vision_fields(fields, raw_text=ocr.full_text, source="gemini_vision")
         else:
             raise ValueError(f"Unsupported OCR engine: {engine}")
 
-    parsed = OCRPipeline().parse_ocr_result(parse_ocr)
     return {
         "image": {
             "width": image_info.width,
@@ -352,6 +394,78 @@ def run_paddle_with_rotation(
             best = (score, degrees, ocr)
     assert best is not None
     return best[2], best[1], None, candidates, best[2]
+
+
+def run_lmstudio_vision(
+    image_path: Path,
+    mode: str,
+    rotation: str,
+    selected_model: str | None = None,
+) -> tuple[OCRResult, int, None, list[dict], dict]:
+    degrees = 0 if rotation == "auto" else int(rotation)
+    rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
+    rotate_image(image_path, rotated_path, degrees)
+    fields, ocr = LMStudioVisionEngine().recognize_fields(
+        rotated_path,
+        preprocessing=f"filtered_{mode}_rot{degrees}",
+        selected_model=selected_model,
+    )
+    score = score_vision_fields(fields)
+    candidates = [
+        {
+            "rotation": degrees,
+            "psm": None,
+            "score": round(score, 4),
+            "blocks": 0,
+            "text_preview": ocr.full_text[:160],
+        }
+    ]
+    return ocr, degrees, None, candidates, fields
+
+
+def run_gemini_vision(
+    image_path: Path,
+    mode: str,
+    rotation: str,
+    selected_model: str | None = None,
+) -> tuple[OCRResult, int, None, list[dict], dict]:
+    degrees = 0 if rotation == "auto" else int(rotation)
+    rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
+    rotate_image(image_path, rotated_path, degrees)
+    fields, ocr = GeminiVisionEngine().recognize_fields(
+        rotated_path,
+        preprocessing=f"filtered_{mode}_rot{degrees}",
+        selected_model=selected_model,
+    )
+    score = score_vision_fields(fields)
+    candidates = [
+        {
+            "rotation": degrees,
+            "psm": None,
+            "score": round(score, 4),
+            "blocks": 0,
+            "text_preview": ocr.full_text[:160],
+        }
+    ]
+    return ocr, degrees, None, candidates, fields
+
+
+def score_vision_fields(fields: dict) -> float:
+    return sum(1.0 for name in FIELD_NAMES if fields.get(name)) / len(FIELD_NAMES)
+
+
+def nid_data_from_vision_fields(fields: dict, raw_text: str, source: str) -> NIDData:
+    values = {}
+    for name in FIELD_NAMES:
+        value = fields.get(name)
+        text = str(value).strip() if value is not None else None
+        values[name] = FieldResult(
+            raw_value=text or None,
+            confidence=0.80 if text else 0.0,
+            needs_review=True,
+            source=source,
+        )
+    return NIDData(raw_text=raw_text, **values)
 
 
 def combine_selected_rotation_ocr(

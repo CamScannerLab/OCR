@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ class PaddleOCREngine(OCREngine):
                 "source_image": str(image_path),
                 "paddle_language": paddle_language,
                 "raw_result_shape": describe_result(raw),
+                "raw_response": serialize_raw_result(raw),
             },
         )
 
@@ -175,3 +177,11 @@ def describe_result(raw: Any) -> str:
     if isinstance(raw, list):
         return f"list:{len(raw)}"
     return type(raw).__name__
+
+
+def serialize_raw_result(raw: Any) -> Any:
+    try:
+        json.dumps(raw, ensure_ascii=False)
+        return raw
+    except (TypeError, ValueError):
+        return repr(raw)

@@ -26,12 +26,15 @@ const annotationDetails = document.querySelector("#annotationDetails");
 const ocrEngineSelect = document.querySelector("#ocrEngineSelect");
 const ocrLanguageSelect = document.querySelector("#ocrLanguageSelect");
 const ocrRotationSelect = document.querySelector("#ocrRotationSelect");
+const ocrModelLabel = document.querySelector("#ocrModelLabel");
+const ocrModelSelect = document.querySelector("#ocrModelSelect");
 const runOcrButton = document.querySelector("#runOcrButton");
 const ocrStatus = document.querySelector("#ocrStatus");
 const ocrSummaryOutput = document.querySelector("#ocrSummaryOutput");
 const parsedFieldsOutput = document.querySelector("#parsedFieldsOutput");
 const rawTextOutput = document.querySelector("#rawTextOutput");
 const ocrJsonOutput = document.querySelector("#ocrJsonOutput");
+const engineRawOutput = document.querySelector("#engineRawOutput");
 const toggleOverlay = document.querySelector("#toggleOverlay");
 const fitMode = document.querySelector("#fitMode");
 
@@ -53,7 +56,8 @@ async function boot() {
 }
 
 function renderOcrStatus() {
-  const engine = state.ocrStatus?.engines?.find((item) => item.id === ocrEngineSelect.value);
+  const engine = selectedOcrEngine();
+  renderModelOptions(engine);
   if (!engine) {
     ocrStatus.textContent = "No OCR engine selected.";
     runOcrButton.disabled = true;
@@ -64,8 +68,37 @@ function renderOcrStatus() {
     runOcrButton.disabled = true;
     return;
   }
-  ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language options found`;
+  const modelText = isVisionEngine(engine.id) && ocrModelSelect.value ? ` · model ${ocrModelSelect.value}` : "";
+  ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language options found${modelText}`;
   runOcrButton.disabled = false;
+}
+
+function selectedOcrEngine() {
+  return state.ocrStatus?.engines?.find((item) => item.id === ocrEngineSelect.value);
+}
+
+function isVisionEngine(engineId) {
+  return engineId === "gemini_vision" || engineId === "lmstudio_vision";
+}
+
+function renderModelOptions(engine) {
+  const show = Boolean(engine && isVisionEngine(engine.id));
+  ocrModelLabel.hidden = !show;
+  ocrModelSelect.disabled = !show;
+  if (!show) {
+    ocrModelSelect.innerHTML = "";
+    return;
+  }
+  const previous = ocrModelSelect.value;
+  const models = [...new Set([...(engine.models || []), engine.model].filter(Boolean))];
+  ocrModelSelect.innerHTML = "";
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model === engine.model ? `${model} (default)` : model;
+    ocrModelSelect.appendChild(option);
+  }
+  ocrModelSelect.value = models.includes(previous) ? previous : (engine.model || models[0] || "");
 }
 
 function renderList() {
@@ -280,6 +313,7 @@ filterSelect.addEventListener("change", updateImages);
 search.addEventListener("input", renderList);
 window.addEventListener("resize", drawOverlay);
 ocrEngineSelect.addEventListener("change", renderOcrStatus);
+ocrModelSelect.addEventListener("change", renderOcrStatus);
 runOcrButton.addEventListener("click", runOcr);
 
 toggleOverlay.addEventListener("click", () => {
@@ -316,6 +350,7 @@ async function runOcr() {
         engine: ocrEngineSelect.value,
         language: ocrLanguageSelect.value,
         rotation: ocrRotationSelect.value,
+        model: ocrModelSelect.disabled ? null : ocrModelSelect.value,
         mode,
         image_path: imagePath,
         annotation_path: state.selected?.annotation || null,
@@ -340,6 +375,7 @@ function setOcrMessage(message) {
   parsedFieldsOutput.innerHTML = "";
   rawTextOutput.textContent = "";
   ocrJsonOutput.textContent = "{}";
+  engineRawOutput.textContent = "{}";
 }
 
 function renderOcrResult(result) {
@@ -347,6 +383,16 @@ function renderOcrResult(result) {
   parsedFieldsOutput.innerHTML = formatParsedFields(result.parsed || {});
   rawTextOutput.textContent = result.ocr?.full_text || result.parsed?.raw_text || "";
   ocrJsonOutput.textContent = JSON.stringify(result.ocr || {}, null, 2);
+  engineRawOutput.textContent = formatRawEngineResponse(result.ocr);
+}
+
+function formatRawEngineResponse(ocr) {
+  const metadata = ocr?.metadata || {};
+  const raw = metadata.raw_response ?? metadata.raw_content ?? ocr?.full_text ?? "";
+  if (typeof raw === "string") {
+    return raw;
+  }
+  return JSON.stringify(raw, null, 2);
 }
 
 function formatOcrSummary(result) {
@@ -356,16 +402,25 @@ function formatOcrSummary(result) {
       return `rot ${candidate.rotation}${psm}: ${candidate.score}`;
     })
     .join(" · ");
-  return [
+  const chips = [
     chip(`Image ${result.image?.width} x ${result.image?.height}`),
     chip(result.image?.mode || ""),
     chip(`Rotation ${result.rotation}`),
-    chip(`PSM ${result.psm ?? ""}`),
+  ];
+  if (result.psm !== null && result.psm !== undefined) {
+    chips.push(chip(`PSM ${result.psm}`));
+  }
+  const model = result.ocr?.metadata?.model;
+  chips.push(
     chip(`${Math.round(result.ocr?.latency_ms || 0)} ms`),
     chip(result.ocr?.engine || ""),
     chip(result.ocr?.language || ""),
-    chip(candidates || "No rotation candidates", "wide"),
-  ].join("");
+  );
+  if (model) {
+    chips.push(chip(`Model ${model}`));
+  }
+  chips.push(chip(candidates || "No rotation candidates", "wide"));
+  return chips.join("");
 }
 
 function formatParsedFields(parsed) {
