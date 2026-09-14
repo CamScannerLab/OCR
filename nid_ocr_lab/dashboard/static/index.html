@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NID OCR Lab</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260914-models">
+    <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
     <aside class="sidebar">
@@ -75,9 +75,6 @@
             <span>Engine</span>
             <select id="ocrEngineSelect">
               <option value="tesseract">Tesseract</option>
-              <option value="paddleocr">PaddleOCR</option>
-              <option value="lmstudio_vision">LM Studio Vision</option>
-              <option value="gemini_vision">Gemini Vision</option>
             </select>
           </label>
           <label>
@@ -91,16 +88,12 @@
           <label>
             <span>Rotation</span>
             <select id="ocrRotationSelect">
-              <option value="auto" selected>auto</option>
+              <option value="auto">auto</option>
               <option value="0">0</option>
               <option value="90">90</option>
               <option value="180">180</option>
               <option value="270">270</option>
             </select>
-          </label>
-          <label id="ocrModelLabel" class="model-control" hidden>
-            <span>Model</span>
-            <select id="ocrModelSelect"></select>
           </label>
           <button id="runOcrButton" type="button">Run OCR</button>
         </div>
@@ -111,16 +104,12 @@
             <div id="ocrSummaryOutput" class="summary-chips"></div>
           </section>
           <section class="ocr-text-panel">
-            <h4>OCR Text <span>engine output</span></h4>
+            <h4>OCR Text <span>from Tesseract TSV</span></h4>
             <pre id="rawTextOutput" class="ocr-text"></pre>
           </section>
           <section class="parsed-panel">
             <h4>Parsed Fields <span>NID parser output</span></h4>
             <div id="parsedFieldsOutput" class="field-grid"></div>
-          </section>
-          <section class="raw-engine-panel">
-            <h4>Raw Engine Response <span>original engine/provider payload</span></h4>
-            <pre id="engineRawOutput" class="json-output">{}</pre>
           </section>
           <section class="ocr-json-panel">
             <h4>OCR JSON <span>our normalized result object</span></h4>
@@ -145,6 +134,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260914-models"></script>
+    <script src="/static/app.js"></script>
   </body>
 </html>

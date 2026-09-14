@@ -23,7 +23,6 @@ class TesseractEngine(OCREngine):
         image_path: Path,
         languages: list[str],
         preprocessing: str | None = None,
-        psm: int | None = None,
     ) -> OCRResult:
         if shutil.which(self.binary) is None:
             raise RuntimeError(
@@ -40,13 +39,11 @@ class TesseractEngine(OCREngine):
                 str(output_base),
                 "-l",
                 language,
-                *(["--psm", str(psm)] if psm is not None else []),
                 "tsv",
             ]
             subprocess.run(command, check=True, capture_output=True, text=True)
             tsv_path = output_base.with_suffix(".tsv")
-            raw_tsv = tsv_path.read_text(encoding="utf-8", errors="replace")
-            blocks = parse_tsv(raw_tsv)
+            blocks = parse_tsv(tsv_path.read_text(encoding="utf-8", errors="replace"))
 
         latency_ms = (time.perf_counter() - started) * 1000
         full_text = "\n".join(block.text for block in blocks if block.text)
@@ -57,7 +54,7 @@ class TesseractEngine(OCREngine):
             language=language,
             preprocessing=preprocessing,
             latency_ms=latency_ms,
-            metadata={"source_image": str(image_path), "psm": psm, "raw_response": raw_tsv},
+            metadata={"source_image": str(image_path)},
         )
 
 
@@ -125,3 +122,4 @@ def ocr_result_to_json(result: OCRResult) -> dict[str, Any]:
             for block in result.blocks
         ],
     }
+

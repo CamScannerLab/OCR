@@ -335,33 +335,32 @@ select {
 }
 
 .ocr-summary-panel {
-  grid-column: 1 / -1;
+  grid-column: 1;
   grid-row: 1;
+  border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 
 .ocr-text-panel {
-  grid-column: 1;
-  grid-row: 2;
-  border-right: 1px solid var(--line);
+  grid-column: 2;
+  grid-row: 1;
+  border-right: 0;
   border-bottom: 1px solid var(--line);
 }
 
 .parsed-panel {
-  grid-column: 2;
-  grid-row: 2;
-  border-bottom: 1px solid var(--line);
-}
-
-.raw-engine-panel {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 2;
   border-right: 1px solid var(--line);
+  border-bottom: 0;
 }
 
 .ocr-json-panel {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 2;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
 }
 
 .ocr-results h4 {
@@ -395,14 +394,13 @@ select {
 
 .summary-chips {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px;
-  align-items: center;
-  min-height: 42px;
-  max-height: 54px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  padding: 12px;
+  align-content: flex-start;
+  min-height: 136px;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .chip {
@@ -416,12 +414,12 @@ select {
 }
 
 .chip.wide {
-  flex: 0 0 auto;
+  flex-basis: 100%;
   font-weight: 500;
   color: var(--muted);
   background: #f7faf8;
   border-color: var(--line);
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .chip.muted {
@@ -553,7 +551,6 @@ pre {
   .ocr-summary-panel,
   .ocr-text-panel,
   .parsed-panel,
-  .raw-engine-panel,
   .ocr-json-panel {
     grid-column: auto;
     grid-row: auto;
