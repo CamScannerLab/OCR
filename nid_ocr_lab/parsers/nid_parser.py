@@ -1,83 +1,83 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from nid_ocr_lab.models import FIELD_NAMES, FieldResult, NIDData, OCRResult
 
 
-DATE_PATTERNS = [
-    re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b"),
-    re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b"),
-]
-
 MONTHS = {
-    "jan": "01",
-    "january": "01",
-    "feb": "02",
-    "february": "02",
-    "mar": "03",
-    "march": "03",
-    "apr": "04",
-    "april": "04",
-    "may": "05",
-    "jun": "06",
-    "june": "06",
-    "jul": "07",
-    "july": "07",
-    "aug": "08",
-    "august": "08",
-    "sep": "09",
-    "sept": "09",
-    "september": "09",
-    "oct": "10",
-    "october": "10",
-    "nov": "11",
-    "november": "11",
-    "dec": "12",
-    "december": "12",
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10, "october": 10,
+    "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 
-MONTH_DATE_PATTERN = re.compile(
-    r"\b(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b",
-    re.IGNORECASE,
-)
+ISO_DATE_PATTERN = re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+DMY_DATE_PATTERN = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b")
+MONTH_DATE_PATTERN = re.compile(r"\b(\d{1,2})\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})\b", re.IGNORECASE)
 
 NID_CONTEXT_PATTERN = re.compile(
-    r"\b(?:ID|NID)\s*(?:NO|NUMBER|নং)?\s*[:：]?\s*([0-9০-৯]{8,17})\b",
+    r"\b(?:ID|NID)\s*(?:NO|NUMBER|নং)?\.?\s*[:：]?\s*([0-9০-৯]{8,17})\b",
     re.IGNORECASE,
 )
 
 BANGLA_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+BENGALI_RANGE = "ঀ-৿"
+LETTER_CLASS = f"A-Za-z{BENGALI_RANGE}'’"
+
+# (field, labels, expected script). English labels match case-insensitively.
+LABELED_FIELDS = [
+    ("name_bangla", ["নাম"], "ben"),
+    ("name_english", ["name"], "eng"),
+    ("father_name_bangla", ["পিতা"], "ben"),
+    ("father_name_english", ["father's name", "father"], "eng"),
+    ("mother_name_bangla", ["মাতা"], "ben"),
+    ("mother_name_english", ["mother's name", "mother"], "eng"),
+    ("address_bangla", ["ঠিকানা"], "ben"),
+    ("address_english", ["address"], "eng"),
+]
+
+# A bare "Name"/"নাম" label preceded by one of these belongs to another person's field.
+RELATION_WORDS = ("father", "mother", "husband", "spouse", "পিতা", "মাতা", "স্বামী", "স্ত্রী")
+
+LABEL_WORDS = {
+    "date", "birth", "id", "no", "name", "father", "mother", "address",
+    "নাম", "পিতা", "মাতা", "ঠিকানা", "জন্ম", "তারিখ",
+}
 
 
 class NIDParser:
-    """Initial text parser for R&D.
+    """Text parser for R&D.
 
-    This parser intentionally starts simple. The benchmark should expose where
-    layout-aware bbox parsing and ROI fallback are needed.
+    Works on line-level OCR text (one OCR line per text line). Values are routed by
+    label script: Bengali labels fill *_bangla fields, English labels fill *_english.
     """
 
     def parse(self, ocr: OCRResult) -> NIDData:
         text = normalize_space(ocr.full_text)
         fields = {name: empty_field() for name in FIELD_NAMES}
         fields["nid_number"] = find_nid_number(text)
-        fields["date_of_birth"] = find_date_of_birth(text)
+        fields["date_of_birth"] = find_date_of_birth(ocr.full_text)
 
         lines = [normalize_space(line) for line in ocr.full_text.splitlines()]
-        fields["name_english"] = find_labeled_value(lines, ["name", "নাম"])
-        fields["father_name_english"] = find_labeled_value(lines, ["father", "পিতা"])
-        fields["mother_name_english"] = find_labeled_value(lines, ["mother", "মাতা"])
-        fields["address_english"] = find_labeled_value(lines, ["address", "ঠিকানা"])
+        lines = [line for line in lines if line]
+        for field, labels, script in LABELED_FIELDS:
+            fields[field] = find_labeled_value(lines, labels, script)
 
         return NIDData(raw_text=ocr.full_text, **fields)
 
 
-def empty_field() -> FieldResult:
-    return FieldResult(raw_value=None, confidence=0.0, needs_review=True)
+def empty_field(source: str | None = None) -> FieldResult:
+    return FieldResult(raw_value=None, confidence=0.0, needs_review=True, source=source)
 
 
 def normalize_space(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def normalize_digits(value: str) -> str:
+    return value.translate(BANGLA_DIGITS)
 
 
 def find_nid_number(text: str) -> FieldResult:
@@ -89,117 +89,103 @@ def find_nid_number(text: str) -> FieldResult:
             needs_review=False,
             source="id-context-regex",
         )
-    ascii_candidates = re.findall(r"\b[0-9]{10,17}\b", text)
-    if ascii_candidates:
-        value = max(ascii_candidates, key=lambda item: (len(item) == 10, len(item)))
-        return FieldResult(raw_value=value, confidence=0.85, needs_review=False, source="regex")
     candidates = re.findall(r"\b[0-9০-৯]{10,17}\b", text)
     if not candidates:
         return empty_field()
-    value = normalize_digits(max(candidates, key=len))
-    return FieldResult(raw_value=value, confidence=0.85, needs_review=False, source="regex")
+    normalized = [normalize_digits(item) for item in candidates]
+    value = max(normalized, key=lambda item: (len(item) in (10, 13, 17), len(item)))
+    return FieldResult(raw_value=value, confidence=0.70, needs_review=True, source="regex")
 
 
-def normalize_digits(value: str) -> str:
-    return value.translate(BANGLA_DIGITS)
+def valid_iso(year: int, month: int, day: int) -> str | None:
+    try:
+        parsed = date(year, month, day)
+    except ValueError:
+        return None
+    if not 1900 <= parsed.year <= date.today().year:
+        return None
+    return parsed.isoformat()
 
 
 def find_date_of_birth(text: str) -> FieldResult:
-    for pattern in DATE_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            value = "-".join(part.zfill(2) for part in match.groups())
-            return FieldResult(raw_value=value, confidence=0.75, needs_review=False, source="regex")
-    match = MONTH_DATE_PATTERN.search(text)
-    if match:
-        day, month_name, year = match.groups()
-        month = MONTHS.get(month_name.lower().rstrip("."))
-        if month:
-            value = f"{year}-{month}-{day.zfill(2)}"
-            return FieldResult(raw_value=value, confidence=0.75, needs_review=False, source="regex")
+    normalized = normalize_digits(text)
+    lines = normalized.splitlines()
+    # Prefer the line carrying the birth-date label, then anywhere in the text.
+    labeled = [line for line in lines if re.search(r"birth|জন্ম", line, re.IGNORECASE)]
+    for source, haystack in (("dob-label", "\n".join(labeled)), ("regex", normalized)):
+        if not haystack:
+            continue
+        for match in MONTH_DATE_PATTERN.finditer(haystack):
+            day, month_name, year = match.groups()
+            month = MONTHS.get(month_name.lower().rstrip("."))
+            iso = valid_iso(int(year), month, int(day)) if month else None
+            if iso:
+                return FieldResult(raw_value=iso, confidence=0.75, needs_review=False, source=source)
+        for match in ISO_DATE_PATTERN.finditer(haystack):
+            year, month, day = match.groups()
+            iso = valid_iso(int(year), int(month), int(day))
+            if iso:
+                return FieldResult(raw_value=iso, confidence=0.70, needs_review=False, source=source)
+        for match in DMY_DATE_PATTERN.finditer(haystack):
+            day, month, year = match.groups()
+            iso = valid_iso(int(year), int(month), int(day))
+            if iso:
+                return FieldResult(raw_value=iso, confidence=0.70, needs_review=False, source=source)
     return empty_field()
 
 
-def find_labeled_value(lines: list[str], labels: list[str]) -> FieldResult:
-    lowered_labels = [label.lower() for label in labels]
+def label_match(line: str, label: str) -> re.Match | None:
+    flags = re.IGNORECASE if label.isascii() else 0
+    escaped = re.escape(label).replace("'", "['’]?")
+    pattern = re.compile(rf"(?<![{LETTER_CLASS}]){escaped}(?![{LETTER_CLASS}])\s*[:：]?", flags)
+    for match in pattern.finditer(line):
+        prefix = line[: match.start()].lower()
+        followed_by_colon = match.group(0).rstrip().endswith((":", "："))
+        at_start = not re.search(rf"[{LETTER_CLASS}0-9]", prefix)
+        if not (followed_by_colon or at_start):
+            continue
+        if label in ("name", "নাম") and any(word in prefix for word in RELATION_WORDS):
+            continue
+        return match
+    return None
+
+
+def script_share(value: str, script: str) -> float:
+    bengali = sum(1 for char in value if "ঀ" <= char <= "৿")
+    latin = sum(1 for char in value if char.isascii() and char.isalpha())
+    letters = bengali + latin
+    if not letters:
+        return 0.0
+    return (bengali if script == "ben" else latin) / letters
+
+
+def find_labeled_value(lines: list[str], labels: list[str], script: str) -> FieldResult:
     for index, line in enumerate(lines):
-        lower = line.lower()
-        if any(label in lower for label in lowered_labels):
-            inline = value_after_separator(line)
-            if inline:
-                return FieldResult(raw_value=inline, confidence=0.55, needs_review=True, source="label-inline")
-            previous = previous_value(lines, index - 1)
-            if previous:
-                return FieldResult(raw_value=previous, confidence=0.50, needs_review=True, source="label-previous-line")
-            value = following_value(lines, index + 1)
-            if value:
-                return FieldResult(raw_value=value, confidence=0.50, needs_review=True, source="label-next-line")
+        match = next((found for label in labels if (found := label_match(line, label))), None)
+        if not match:
+            continue
+        inline = normalize_space(line[match.end():]).strip(":： ")
+        if inline:
+            candidate, source = inline, "label-inline"
+        else:
+            candidate, source = following_value(lines, index + 1), "label-next-line"
+        if not candidate:
+            continue
+        if script_share(candidate, script) < 0.6:
+            return empty_field(source=f"{source}-script-mismatch")
+        return FieldResult(raw_value=candidate, confidence=0.55, needs_review=True, source=source)
     return empty_field()
 
 
 def following_value(lines: list[str], start: int) -> str | None:
     values = []
-    stop_words = {
-        "date",
-        "birth",
-        "id",
-        "no",
-        "father",
-        "mother",
-        "address",
-        "নাম",
-        "পিতা",
-        "মাতা",
-        "ঠিকানা",
-    }
-    for line in lines[start : start + 4]:
+    for line in lines[start : start + 2]:
         value = normalize_space(line)
         if not value:
             continue
-        lower = value.lower().strip(":：")
-        if lower in stop_words:
-            break
-        if re.search(r"\d", value):
+        first_word = re.split(r"[\s:：]+", value.lower(), maxsplit=1)[0]
+        if first_word in LABEL_WORDS or re.search(r"\d", value):
             break
         values.append(value)
+        break
     return normalize_space(" ".join(values)) if values else None
-
-
-def previous_value(lines: list[str], index: int) -> str | None:
-    if index < 0:
-        return None
-    value = normalize_space(lines[index])
-    if not value or re.search(r"\d", value):
-        return None
-    lower = value.lower().strip(":：")
-    stop_words = {
-        "government",
-        "bangladesh",
-        "national",
-        "id",
-        "card",
-        "name",
-        "father",
-        "mother",
-        "address",
-        "গণপ্রজাতন্ত্রী",
-        "বাংলাদেশ",
-        "সরকার",
-        "জাতীয়",
-        "পরিচয়",
-        "পত্র",
-        "নাম",
-        "পিতা",
-        "মাতা",
-    }
-    if lower in stop_words:
-        return None
-    return value
-
-
-def value_after_separator(line: str) -> str | None:
-    parts = re.split(r"[:：]", line, maxsplit=1)
-    if len(parts) != 2:
-        return None
-    value = normalize_space(parts[1])
-    return value or None

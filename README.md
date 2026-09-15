@@ -17,7 +17,7 @@ This OCR lab should consume SmartScan outputs rather than redoing the scanner la
 
 Start here for setup, runtime, dashboard behavior, OCR status, installed tools, and handoff notes:
 
-[Developer.md](/Users/admin/Desktop/KSL_Projects/R&D/OCR/Developer.md)
+[Developer.md](Developer.md)
 
 ## Current Boundary
 
@@ -122,4 +122,4 @@ nid_ocr_lab/
   parsers/
 ```
 
-For full setup and handoff details, see [Developer.md](/Users/admin/Desktop/KSL_Projects/R&D/OCR/Developer.md).
+For full setup and handoff details, see [Developer.md](Developer.md).

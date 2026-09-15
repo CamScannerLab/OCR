@@ -13,6 +13,13 @@ from nid_ocr_lab.pipeline import OCRPipeline
 
 
 def main() -> None:
+    try:
+        run_cli()
+    except (RuntimeError, ValueError) as exc:
+        raise SystemExit(f"error: {exc}") from None
+
+
+def run_cli() -> None:
     parser = argparse.ArgumentParser(description="Bangladesh NID OCR R&D harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -23,7 +30,12 @@ def main() -> None:
     tess_parser.add_argument("image", type=Path)
     tess_parser.add_argument("--lang", default="eng", help="Tesseract language string, for example eng, ben, or eng+ben")
     tess_parser.add_argument("--preprocessing", default=None)
-    tess_parser.add_argument("--psm", type=int, default=None)
+    tess_parser.add_argument("--psm", type=int, default=None, help="Page segmentation mode (default 6)")
+    tess_parser.add_argument("--oem", type=int, default=1)
+    tess_parser.add_argument("--dpi", type=int, default=None, help="Default: image metadata, else Tesseract's estimate")
+    tess_parser.add_argument(
+        "--variant", default="system", help="Model folder: system (fast), best, or custom/<name>"
+    )
     tess_parser.add_argument("--output", type=Path, default=None)
 
     paddle_parser = subparsers.add_parser("ocr-paddle", help="Run PaddleOCR and emit OCR JSON")
@@ -36,6 +48,44 @@ def main() -> None:
     eval_parser.add_argument("ocr_output_dir", type=Path)
     eval_parser.add_argument("manifest", type=Path)
 
+    split_parser = subparsers.add_parser("training-split", help="Split labeled lines into train/eval by card")
+    split_parser.add_argument("--dataset", default="nid_ben")
+    split_parser.add_argument("--eval-ratio", type=float, default=0.15)
+    split_parser.add_argument("--seed", type=int, default=0)
+
+    train_parser = subparsers.add_parser("train-tesseract", help="Fine-tune a tessdata_best model with tesstrain")
+    train_parser.add_argument("--dataset", default="nid_ben")
+    train_parser.add_argument("--model", default="nid_ben")
+    train_parser.add_argument("--start-model", default="ben")
+    train_parser.add_argument("--max-iterations", type=int, default=3000)
+    train_parser.add_argument("--learning-rate", type=float, default=0.0001)
+    train_parser.add_argument("--lang-type", default="Indic")
+
+    draft_parser = subparsers.add_parser(
+        "draft-lines", help="OCR images and save every line crop with Tesseract's guess as a draft to correct"
+    )
+    draft_parser.add_argument("paths", type=Path, nargs="+", help="Image files or folders (searched recursively)")
+    draft_parser.add_argument("--dataset", default="nid_ben")
+    draft_parser.add_argument("--filter", default="nid_ink", help="Dashboard filter applied before OCR")
+    draft_parser.add_argument("--strategy", default="fields", choices=["single", "sweep", "fields"])
+    draft_parser.add_argument("--variant", default="best", help="Model folder: system, best, or custom/<name>")
+    draft_parser.add_argument("--lang", default="ben+eng")
+    draft_parser.add_argument("--rotation", default="auto", choices=["auto", "0", "90", "180", "270"])
+    draft_parser.add_argument("--psm", type=int, default=6)
+    draft_parser.add_argument(
+        "--script", default="ben", choices=["ben", "eng", "digits", "all"], help="Keep only lines in this script"
+    )
+
+    promote_parser = subparsers.add_parser("promote-drafts", help="Move corrected drafts into ground truth")
+    promote_parser.add_argument("--dataset", default="nid_ben")
+
+    teval_parser = subparsers.add_parser("eval-tesseract", help="Compare Tesseract models on held-out labeled lines")
+    teval_parser.add_argument("--dataset", default="nid_ben")
+    teval_parser.add_argument(
+        "--models", default="system:ben,best:ben", help="Comma-separated <variant>:<lang>, e.g. best:ben,custom/nid_ben:nid_ben"
+    )
+    teval_parser.add_argument("--split", choices=["eval", "train"], default="eval")
+
     args = parser.parse_args()
     if args.command == "parse-json":
         result = OCRPipeline().parse_ocr_result(load_ocr_json(args.ocr_json))
@@ -47,6 +97,9 @@ def main() -> None:
             languages,
             preprocessing=args.preprocessing,
             psm=args.psm,
+            variant=args.variant,
+            oem=args.oem,
+            dpi=args.dpi,
         )
         payload = ocr_result_to_json(result)
         if args.output:
@@ -66,6 +119,48 @@ def main() -> None:
     elif args.command == "evaluate":
         report = evaluate_dir(args.ocr_output_dir, args.manifest)
         print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif args.command == "training-split":
+        from nid_ocr_lab.training.dataset import write_split
+
+        print(json.dumps(write_split(args.dataset, args.eval_ratio, args.seed), indent=2))
+    elif args.command == "train-tesseract":
+        from nid_ocr_lab.training.tesstrain_runner import train
+
+        info = train(
+            args.dataset,
+            args.model,
+            start_model=args.start_model,
+            max_iterations=args.max_iterations,
+            learning_rate=args.learning_rate,
+            lang_type=args.lang_type,
+        )
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+    elif args.command == "draft-lines":
+        from nid_ocr_lab.training.drafts import draft_lines
+
+        summary = draft_lines(
+            args.paths,
+            args.dataset,
+            filter_mode=args.filter,
+            strategy=args.strategy,
+            variant=args.variant,
+            language=args.lang,
+            rotation=args.rotation,
+            psm=args.psm,
+            script=args.script,
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    elif args.command == "promote-drafts":
+        from nid_ocr_lab.training.drafts import promote_drafts
+
+        print(json.dumps(promote_drafts(args.dataset), indent=2, ensure_ascii=False))
+    elif args.command == "eval-tesseract":
+        from nid_ocr_lab.training.tesstrain_runner import evaluate_models
+
+        report = evaluate_models(args.dataset, [spec.strip() for spec in args.models.split(",") if spec.strip()], args.split)
+        summary = {key: value for key, value in report.items() if key != "models"}
+        summary["models"] = [{key: value for key, value in model.items() if key != "errors"} for model in report["models"]]
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 def evaluate_dir(ocr_output_dir: Path, manifest_path: Path) -> dict[str, Any]:

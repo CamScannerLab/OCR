@@ -4,13 +4,18 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NID OCR Lab</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260914-models">
+    <link rel="stylesheet" href="/static/styles.css?v=20260915-pickfile">
   </head>
   <body>
     <aside class="sidebar">
       <div class="brand">
         <h1>NID OCR Lab</h1>
         <p>SmartScan output viewer</p>
+      </div>
+      <div id="uploadZone" class="upload-zone">
+        <input id="uploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple hidden>
+        <button id="uploadButton" type="button">Upload image / PDF</button>
+        <span id="uploadStatus">or drop files here · stored in benchmark/uploads (gitignored)</span>
       </div>
       <label class="search">
         <span>Search</span>
@@ -49,7 +54,7 @@
 
         <article class="viewer">
           <div class="viewer-head">
-            <h3>Filter</h3>
+            <h3 id="filterHeading">Filter</h3>
             <select id="filterSelect">
               <option value="original">Original</option>
               <option value="enhance">Enhance</option>
@@ -59,6 +64,7 @@
               <option value="edge">Edge</option>
               <option value="gray">Gray</option>
               <option value="threshold">Threshold</option>
+              <option value="nid_ink">NID ink (remove emblem)</option>
               <option value="mask_overlay">Mask Overlay</option>
             </select>
           </div>
@@ -70,22 +76,36 @@
 
       <article class="ocr-card">
         <h3>OCR</h3>
+        <div class="ocr-file-bar">
+          <button id="ocrPickFileButton" type="button">Choose image / PDF from computer…</button>
+          <span id="ocrFileInfo">OCR any JPEG, PNG, WEBP, TIFF, BMP or PDF from your computer. It is saved to benchmark/uploads (gitignored) and selected here.</span>
+        </div>
         <div class="ocr-controls">
           <label>
             <span>Engine</span>
             <select id="ocrEngineSelect">
               <option value="tesseract">Tesseract</option>
+              <option value="easyocr">EasyOCR</option>
               <option value="paddleocr">PaddleOCR</option>
               <option value="lmstudio_vision">LM Studio Vision</option>
               <option value="gemini_vision">Gemini Vision</option>
             </select>
           </label>
           <label>
+            <span>OCR input</span>
+            <select id="ocrInputSelect">
+              <option value="as_is">As uploaded + filter (no crop/resize)</option>
+              <option value="filter">Filter preview</option>
+            </select>
+          </label>
+          <label>
             <span>Language</span>
             <select id="ocrLanguageSelect">
+              <option value="ben+eng">ben+eng</option>
               <option value="eng+ben">eng+ben</option>
               <option value="eng">eng</option>
               <option value="ben">ben</option>
+              <option value="script/Bengali+eng">script/Bengali+eng</option>
             </select>
           </label>
           <label>
@@ -101,6 +121,24 @@
           <label id="ocrModelLabel" class="model-control" hidden>
             <span>Model</span>
             <select id="ocrModelSelect"></select>
+          </label>
+          <label id="ocrPsmLabel" hidden>
+            <span>PSM</span>
+            <select id="ocrPsmSelect">
+              <option value="6" selected>6 · single block</option>
+              <option value="4">4 · single column</option>
+              <option value="3">3 · auto layout</option>
+              <option value="11">11 · sparse text</option>
+              <option value="7">7 · single line</option>
+            </select>
+          </label>
+          <label id="ocrStrategyLabel" hidden>
+            <span>Strategy</span>
+            <select id="ocrStrategySelect">
+              <option value="single" selected>single run</option>
+              <option value="sweep">sweep PSM 3/4/6/11 (research)</option>
+              <option value="fields">NID fields: re-read each row (ben/eng locked)</option>
+            </select>
           </label>
           <button id="runOcrButton" type="button">Run OCR</button>
         </div>
@@ -127,6 +165,19 @@
             <pre id="ocrJsonOutput" class="json-output">{}</pre>
           </section>
         </div>
+        <section id="labelPanel" class="label-panel" hidden>
+          <div class="label-head">
+            <h4>Label lines <span>correct Tesseract lines → training pairs (.png + .gt.txt)</span></h4>
+            <div class="label-controls">
+              <label><span>Dataset</span><input id="labelDataset" value="nid_ben" pattern="[A-Za-z0-9_-]{1,40}"></label>
+              <label><span>Card id</span><input id="labelCardId"></label>
+              <button id="labelSelectAll" type="button">Toggle all</button>
+              <button id="labelSave" type="button">Save selected</button>
+            </div>
+            <div id="labelStatus" class="label-status"></div>
+          </div>
+          <div id="labelRows" class="label-rows"></div>
+        </section>
       </article>
 
       <section class="details">
@@ -145,6 +196,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260914-models"></script>
+    <script src="/static/app.js?v=20260915-pickfile"></script>
   </body>
 </html>

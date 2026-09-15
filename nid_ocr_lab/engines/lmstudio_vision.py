@@ -13,6 +13,10 @@ from nid_ocr_lab.models import FIELD_NAMES, OCRResult
 
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
 DEFAULT_API_KEY = "lm-studio"
+DEFAULT_VISION_MODEL = "qwen2.5-vl-7b-instruct"
+DEFAULT_MAX_TOKENS = 900
+# Thinking models (e.g. qwen3.5) otherwise spend the whole token budget reasoning and return empty content.
+DEFAULT_REASONING_EFFORT = "none"
 
 VISION_PROMPT = """Extract Bangladesh National ID card fields from this image.
 
@@ -77,6 +81,18 @@ def configured_model() -> str:
     return config_value("LM_STUDIO_VISION_MODEL", "").strip()
 
 
+def max_tokens() -> int:
+    try:
+        return max(64, int(config_value("LM_STUDIO_MAX_TOKENS", str(DEFAULT_MAX_TOKENS))))
+    except ValueError:
+        return DEFAULT_MAX_TOKENS
+
+
+def reasoning_effort() -> str | None:
+    value = config_value("LM_STUDIO_REASONING_EFFORT", DEFAULT_REASONING_EFFORT).strip()
+    return None if value.lower() in ("", "default", "model") else value
+
+
 def is_available(timeout: float = 0.75) -> bool:
     return status(timeout=timeout)["available"]
 
@@ -92,7 +108,7 @@ def status(timeout: float = 0.75) -> dict[str, Any]:
             "models": [],
             "note": str(exc),
         }
-    model = configured_model() or (models[0] if models else "")
+    model = configured_model() or preferred_model(models)
     return {
         "available": bool(model),
         "base_url": base_url(),
@@ -113,7 +129,7 @@ def list_models(timeout: float = 2.0) -> list[str]:
     output = []
     for model in models or []:
         model_id = model.get("id") if isinstance(model, dict) else None
-        if model_id:
+        if model_id and "embed" not in str(model_id).lower():
             output.append(str(model_id))
     return output
 
@@ -152,6 +168,9 @@ class LMStudioVisionEngine:
                 "provider": "lm_studio",
                 "base_url": base_url(),
                 "model": model,
+                "max_tokens": max_tokens(),
+                "reasoning_effort": reasoning_effort(),
+                "finish_reason": _finish_reason(response),
                 "raw_content": content,
                 "raw_response": response,
             },
@@ -170,9 +189,14 @@ def normalize_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _first_available_model() -> str:
-    models = list_models(timeout=2.0)
+def preferred_model(models: list[str]) -> str:
+    if DEFAULT_VISION_MODEL in models:
+        return DEFAULT_VISION_MODEL
     return models[0] if models else ""
+
+
+def _first_available_model() -> str:
+    return preferred_model(list_models(timeout=2.0))
 
 
 def _headers() -> dict[str, str]:
@@ -187,7 +211,7 @@ def _chat_completion(model: str, image_path: Path) -> dict[str, Any]:
     body = {
         "model": model,
         "temperature": 0,
-        "max_tokens": 900,
+        "max_tokens": max_tokens(),
         "messages": [
             {
                 "role": "user",
@@ -198,6 +222,9 @@ def _chat_completion(model: str, image_path: Path) -> dict[str, Any]:
             }
         ],
     }
+    effort = reasoning_effort()
+    if effort:
+        body["reasoning_effort"] = effort
     request = urllib.request.Request(
         f"{base_url()}/chat/completions",
         data=json.dumps(body).encode("utf-8"),
@@ -227,6 +254,14 @@ def _extract_content(response: dict[str, Any]) -> str:
         raise RuntimeError("LM Studio returned no choices.")
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     content = message.get("content") if isinstance(message, dict) else None
+    reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
+    if isinstance(content, str) and not content.strip() and reasoning:
+        finish = _finish_reason(response)
+        used = ((response.get("usage") or {}).get("completion_tokens_details") or {}).get("reasoning_tokens")
+        raise RuntimeError(
+            f"LM Studio model spent {used or 'all'} tokens reasoning and returned no answer (finish_reason={finish}). "
+            "Set LM_STUDIO_REASONING_EFFORT=none, raise LM_STUDIO_MAX_TOKENS, or pick a non-thinking vision model."
+        )
     if isinstance(content, str):
         return content.strip()
     if isinstance(content, list):
@@ -236,6 +271,11 @@ def _extract_content(response: dict[str, Any]) -> str:
                 parts.append(item["text"])
         return "\n".join(parts).strip()
     raise RuntimeError("LM Studio returned an unsupported response format.")
+
+
+def _finish_reason(response: dict[str, Any]) -> str | None:
+    choices = response.get("choices") if isinstance(response, dict) else None
+    return choices[0].get("finish_reason") if choices and isinstance(choices[0], dict) else None
 
 
 def _parse_field_json(content: str) -> dict[str, Any]:
