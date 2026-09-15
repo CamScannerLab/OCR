@@ -230,6 +230,26 @@ The run summary shows model versions, OCR call count, DPI source, orientation de
 
 ## Label Lines For Tesseract Training
 
+### Batch: draft every line, correct, promote
+
+Let Tesseract cut the images into line crops and write its guess as the text, then correct the guesses:
+
+```bash
+PY="/Users/admin/Desktop/KSL_Projects/R&D/Smart-Scan/venv/bin/python"
+$PY -m nid_ocr_lab.cli draft-lines path/to/cards benchmark/uploads --dataset nid_ben
+# edit benchmark/training/drafts/nid_ben/*.gt.txt so each matches its .png exactly
+$PY -m nid_ocr_lab.cli promote-drafts --dataset nid_ben
+```
+
+- `draft-lines` takes image files or folders (recursive). Each image runs through the same dashboard pipeline (defaults: `--filter nid_ink --strategy fields --variant best --lang ben+eng --rotation auto`), and every detected line is saved to gitignored `benchmark/training/drafts/<dataset>/` as `.png` + `.gt.txt` (the guess) + `.json`. For dashboard uploads, only `page-NNN.png` is used, and the card id is `<upload id>-pNNN`.
+- `--script ben` (default) keeps only Bengali lines, so a `ben` fine-tune never sees English characters ("Code range changed", see below). Use `--script all` for a `script/Bengali` model.
+- `REVIEW.tsv` in the drafts folder lists stem, crop, guess, confidence and source image for the drafts still waiting. It is rebuilt on every draft or promote run.
+- Correct a `.gt.txt` in place. **Empty** it to postpone that line; **delete** its `.png`/`.gt.txt`/`.json` to discard it.
+- `promote-drafts` moves every non-empty draft into `benchmark/training/ground-truth/<dataset>/`, NFC-normalized, with `status: verified` and `edited: true|false` in the sidecar. It never overwrites an existing stem. Re-run `training-split` afterwards.
+- Only promoted lines are used for training. An unreviewed guess stays in drafts.
+
+### One card: dashboard panel
+
 After a Tesseract run, the **Label lines** panel lists every detected line with its crop, OCR text, script, and confidence.
 
 1. Set **Dataset** (default `nid_ben`) and **Card id** (defaults to the upload id or sample id; keep one id per physical card).

@@ -100,14 +100,21 @@ def guess_script(text: str) -> str:
     return "digits" if digits else "eng"
 
 
-def dataset_dir(dataset: str) -> Path:
+def dataset_dir(dataset: str, root: Path | None = None) -> Path:
     if not NAME_PATTERN.match(dataset or ""):
         raise ValueError("Dataset name may contain only letters, digits, '_' and '-' (max 40)")
-    return ground_truth_root() / dataset
+    return (root or ground_truth_root()) / dataset
 
 
-def save_training_lines(dataset: str, run_id: str, card_id: str, lines: list[dict]) -> list[dict]:
-    target = dataset_dir(dataset)
+def save_training_lines(
+    dataset: str,
+    run_id: str,
+    card_id: str,
+    lines: list[dict],
+    root: Path | None = None,
+    extra: dict | None = None,
+) -> list[dict]:
+    target = dataset_dir(dataset, root)
     target.mkdir(parents=True, exist_ok=True)
     directory = run_dir(run_id)
     context = json.loads((directory / "context.json").read_text(encoding="utf-8"))
@@ -129,11 +136,13 @@ def save_training_lines(dataset: str, run_id: str, card_id: str, lines: list[dic
                 "line_index": index,
                 "text": text,
                 "ocr_text": line.get("ocr_text"),
+                "ocr_confidence": line.get("ocr_confidence"),
                 "script": line.get("script") or guess_script(text),
                 "bounding_box": line["bounding_box"],
                 "crop_box": list(box),
                 "source": context,
                 "saved": datetime.now().isoformat(timespec="seconds"),
+                **(extra or {}),
             }
             (target / f"{stem}.json").write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
             saved.append({"stem": stem, "text": text, "script": sidecar["script"]})

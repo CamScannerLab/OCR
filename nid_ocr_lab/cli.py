@@ -61,6 +61,24 @@ def run_cli() -> None:
     train_parser.add_argument("--learning-rate", type=float, default=0.0001)
     train_parser.add_argument("--lang-type", default="Indic")
 
+    draft_parser = subparsers.add_parser(
+        "draft-lines", help="OCR images and save every line crop with Tesseract's guess as a draft to correct"
+    )
+    draft_parser.add_argument("paths", type=Path, nargs="+", help="Image files or folders (searched recursively)")
+    draft_parser.add_argument("--dataset", default="nid_ben")
+    draft_parser.add_argument("--filter", default="nid_ink", help="Dashboard filter applied before OCR")
+    draft_parser.add_argument("--strategy", default="fields", choices=["single", "sweep", "fields"])
+    draft_parser.add_argument("--variant", default="best", help="Model folder: system, best, or custom/<name>")
+    draft_parser.add_argument("--lang", default="ben+eng")
+    draft_parser.add_argument("--rotation", default="auto", choices=["auto", "0", "90", "180", "270"])
+    draft_parser.add_argument("--psm", type=int, default=6)
+    draft_parser.add_argument(
+        "--script", default="ben", choices=["ben", "eng", "digits", "all"], help="Keep only lines in this script"
+    )
+
+    promote_parser = subparsers.add_parser("promote-drafts", help="Move corrected drafts into ground truth")
+    promote_parser.add_argument("--dataset", default="nid_ben")
+
     teval_parser = subparsers.add_parser("eval-tesseract", help="Compare Tesseract models on held-out labeled lines")
     teval_parser.add_argument("--dataset", default="nid_ben")
     teval_parser.add_argument(
@@ -117,6 +135,25 @@ def run_cli() -> None:
             lang_type=args.lang_type,
         )
         print(json.dumps(info, indent=2, ensure_ascii=False))
+    elif args.command == "draft-lines":
+        from nid_ocr_lab.training.drafts import draft_lines
+
+        summary = draft_lines(
+            args.paths,
+            args.dataset,
+            filter_mode=args.filter,
+            strategy=args.strategy,
+            variant=args.variant,
+            language=args.lang,
+            rotation=args.rotation,
+            psm=args.psm,
+            script=args.script,
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+    elif args.command == "promote-drafts":
+        from nid_ocr_lab.training.drafts import promote_drafts
+
+        print(json.dumps(promote_drafts(args.dataset), indent=2, ensure_ascii=False))
     elif args.command == "eval-tesseract":
         from nid_ocr_lab.training.tesstrain_runner import evaluate_models
 
