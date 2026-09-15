@@ -301,15 +301,12 @@ function updateImages() {
   if (!path) return;
   sourceImage.src = imageUrl(path, "original");
   const asUploaded = ocrInputSelect.value === "as_is";
-  filterSelect.disabled = asUploaded;
   const rotation = previewRotation();
-  const maskOverlay = !asUploaded && filterSelect.value === "mask_overlay";
-  if (asUploaded) {
-    filterImage.src = imageUrl(path, "original", rotation.degrees);
-  } else if (maskOverlay) {
+  const maskOverlay = filterSelect.value === "mask_overlay";
+  if (maskOverlay) {
     const mask = pairedMaskForSelectedSource();
     filterImage.src = mask ? maskOverlayUrl(path, mask) : imageUrl(path, "original");
-  } else if (state.selected?.annotation) {
+  } else if (!asUploaded && state.selected?.annotation) {
     filterImage.src = sdkCropUrl(cropBaseImagePath(), state.selected.annotation, filterSelect.value, rotation.degrees);
   } else {
     filterImage.src = imageUrl(path, filterSelect.value, rotation.degrees);

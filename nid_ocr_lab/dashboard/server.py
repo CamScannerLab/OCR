@@ -20,6 +20,7 @@ from PIL import Image, ImageOps
 from nid_ocr_lab.dashboard.filters import (
     FILTER_MODES,
     ImageInfo,
+    apply_filter,
     render_image,
     render_mask_overlay,
     render_sdk_crop,
@@ -391,8 +392,9 @@ def run_ocr_payload(payload: dict) -> dict:
     with tempfile.TemporaryDirectory(prefix="nid-ocr-dashboard-") as tmp:
         if input_kind == "as_is":
             ocr_input = Path(tmp) / "input.png"
-            image_info = save_as_uploaded(image_path, ocr_input)
-            input_mode, mode = "as_uploaded", "none"
+            mode = payload.get("mode") or "original"
+            image_info = save_as_uploaded(image_path, ocr_input, mode=mode)
+            input_mode = "as_uploaded"
         elif annotation_path:
             ocr_input = Path(tmp) / "filtered.png"
             annotation = load_annotation(annotation_path) or {}
@@ -491,12 +493,16 @@ def run_ocr_payload(payload: dict) -> dict:
     }
 
 
-def save_as_uploaded(image_path: str, target: Path) -> ImageInfo:
-    """No crop, filter, or resize: only EXIF orientation, saved losslessly with DPI metadata kept."""
+def save_as_uploaded(image_path: str, target: Path, mode: str = "original") -> ImageInfo:
+    """No crop or resize: EXIF orientation plus the optional filter, saved losslessly with DPI metadata kept."""
+    if mode not in FILTER_MODES:
+        raise ValueError(f"Unknown filter mode: {mode}")
     with Image.open(image_path) as source:
         dpi = source.info.get("dpi")
         image = ImageOps.exif_transpose(source)
-        if image.mode not in ("RGB", "L"):
+        if mode != "original":
+            image = apply_filter(image.convert("RGB"), mode)
+        elif image.mode not in ("RGB", "L"):
             image = image.convert("RGB")
         image.save(target, **({"dpi": dpi} if dpi else {}))
         return ImageInfo(width=image.width, height=image.height, mode="as_uploaded")
