@@ -16,3 +16,6 @@ benchmark/uploads/
 benchmark/training/
 training/tesstrain/
 training/.venv/
+# Real NID card photos/OCR text and a third-party project copy; keep local only
+benchmark/tesseract_probe/
+benchmark/bangla-ocr-by-abir/
