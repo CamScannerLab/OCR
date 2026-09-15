@@ -35,6 +35,7 @@ from nid_ocr_lab.engines.lmstudio_vision import LMStudioVisionEngine, status as 
 from nid_ocr_lab.engines.paddleocr import PaddleOCREngine, is_available as paddleocr_available
 from nid_ocr_lab.engines.tessdata import list_variants, model_version
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
+from nid_ocr_lab.engines.tesseract_fields import refine_nid_fields
 from nid_ocr_lab.models import FIELD_NAMES, FieldResult, NIDData, OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
 from nid_ocr_lab.training.dataset import crop_line, dataset_stats, save_run, save_training_lines
@@ -600,6 +601,9 @@ def run_tesseract(
     else:
         ocr = reusable.get(degrees) or recognize(input_path, degrees, psm)
         selected_psm = psm
+        if strategy == "fields":
+            ocr = refine_nid_fields(engine, input_path, ocr, variant=variant, workdir=input_path.parent)
+            calls += ocr.metadata["field_calls"]
     return {
         "ocr": ocr,
         "rotation": degrees,

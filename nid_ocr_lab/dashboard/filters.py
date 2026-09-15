@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 
-FILTER_MODES = ["original", "enhance", "deglare", "matte", "super", "edge", "gray", "threshold"]
+FILTER_MODES = ["original", "enhance", "deglare", "matte", "super", "edge", "gray", "threshold", "nid_ink"]
 
 
 @dataclass(frozen=True)
@@ -144,6 +144,8 @@ def apply_filter(image: Image.Image, mode: str) -> Image.Image:
         return ImageEnhance.Contrast(image.convert("L")).enhance(1.35).convert("RGB")
     if normalized == "threshold":
         return threshold(image)
+    if normalized == "nid_ink":
+        return nid_ink(image)
     return image
 
 
@@ -295,6 +297,11 @@ def edge_detect(image: Image.Image) -> Image.Image:
         edges = cv2.Canny(gray, 70, 160)
         return Image.fromarray(edges, "L").convert("RGB")
     return image.convert("L").filter(ImageFilter.FIND_EDGES).convert("RGB")
+
+
+def nid_ink(image: Image.Image) -> Image.Image:
+    """Green channel only: black and red NID ink stay dark, the yellow/orange emblem watermark turns white."""
+    return ImageOps.autocontrast(image.convert("RGB").getchannel("G"), cutoff=1).convert("RGB")
 
 
 def threshold(image: Image.Image) -> Image.Image:

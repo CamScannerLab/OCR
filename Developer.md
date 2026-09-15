@@ -165,10 +165,13 @@ Super
 Edge
 Gray
 Threshold
+NID ink (remove emblem)
 Mask Overlay
 ```
 
 `Mask Overlay` is different from the normal OCR filters. It is for checking annotation/mask quality against the full selected image.
+
+`NID ink` keeps only the green channel (plus autocontrast). Black and red card ink stay dark, and the yellow/orange government emblem behind the নাম/পিতা/মাতা rows turns white. Without it, Tesseract's layout step can merge a row with the emblem and drop it from the output entirely; on a 1780 px card, `best` read 0 of the 4 name rows on `Original` and all 4 on `NID ink`.
 
 ## Upload Any Image Or PDF
 
@@ -185,10 +188,10 @@ OCR controls:
 
 ```text
 Engine:     Tesseract / EasyOCR / PaddleOCR / LM Studio Vision (test only) / Gemini Vision (test only)
-OCR input:  As uploaded (no crop/filter/resize) | Filter preview (SmartScan crop + filter)
+OCR input:  As uploaded + filter (no crop/resize) | Filter preview (SmartScan crop + filter)
 Language:   ben+eng / eng+ben / eng / ben / script/Bengali+eng
 Rotation:   auto / 0 / 90 / 180 / 270
-Tesseract:  Model (system fast / best / custom), PSM (6, 4, 3, 11, 7), Strategy (single / sweep)
+Tesseract:  Model (system fast / best / custom), PSM (6, 4, 3, 11, 7), Strategy (single / sweep / fields)
 ```
 
 The Filter / OCR input preview follows the Rotation select: 0/90/180/270 rotate it clockwise exactly as the OCR request does, and `auto` shows the angle chosen by the last OCR run on that image (heading `auto → N°`). The Source panel stays unrotated so annotation overlays line up.
@@ -203,8 +206,18 @@ selected image -> as uploaded | SDK crop + filter -> PNG
        otherwise OCR at 0/90/180/270 with the chosen PSM and keep the highest sum of word confidences
   -> strategy single: one OCR call at the chosen PSM (reused from the rotation check when possible)
      strategy sweep:  PSM 3/4/6/11, each shown separately with a heuristic score (not accuracy); the parser gets one PSM's text, never a union
+     strategy fields: the single call, then engines/tesseract_fields.py re-reads each NID row (see below)
   -> line-level OCR JSON -> NID parser -> run saved to benchmark/generated/runs/<run_id> (newest 50 kept)
 ```
+
+`fields` strategy (`refine_nid_fields`):
+
+1. Find row labels in the page pass words, in card order: নাম, Name, পিতা, মাতা, Date of Birth, ID NO (common misreads such as `লাম`/`Neme` included).
+2. A row missing between two found rows gets a box interpolated from its neighbours. This restores rows the page pass dropped; a row above the first or below the last found label cannot be restored.
+3. Crop each value (right of the label; vertical padding capped by row spacing), upscale to 64 px, and OCR it with one language: `ben` for Bengali rows, `eng` for Name/DOB, `eng` + digit whitelist for the ID. PSM 7 with a 12 px border first; PSM 13 without a border only if that read scores below 0.75.
+4. Candidates (page value and re-reads) score `confidence × share of letters in the row's script`, and the highest wins. Name rows drop digit/symbol-only tokens. `ocr.metadata.fields` records every candidate, the chosen source (`page` / `reread` / `interpolated` / `missing`) and the crop box; blocks hold the value crops, so restored rows can be labelled for training.
+
+Typical cost is 6–12 extra calls on small crops (~0.5–1 s with `best`). Best results so far: `NID ink` + `fields` + `best` read all six fields on both a 1780 px and a 336 px card.
 
 Typical call counts: 2 when OSD is confident, 5 when it is not (OSD fails on sideways cards with "Too few characters"), 1 with manual rotation. The previous implementation always ran 16 calls and concatenated all PSM outputs for parsing.
 
@@ -231,7 +244,7 @@ Each saved line writes to gitignored `benchmark/training/ground-truth/<dataset>/
 <card>__<run_id>__<nn>.json     card id, bbox, script, original OCR text, model/language/source
 ```
 
-Only lines Tesseract detected can be labeled; if a line was missed entirely, try another PSM or rotation first.
+Only lines Tesseract detected can be labeled; if a line was missed entirely, try the `NID ink` filter and the `fields` strategy (which restores dropped NID rows as value crops), or another PSM or rotation.
 
 ## Train And Evaluate Tesseract
 
