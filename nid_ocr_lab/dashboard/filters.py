@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover - depends on local environment
     cv2 = None
 
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 
 FILTER_MODES = ["original", "enhance", "deglare", "matte", "super", "edge", "gray", "threshold"]
@@ -24,10 +24,12 @@ class ImageInfo:
     mode: str
 
 
-def render_image(path: str, mode: str = "original", max_width: int = 1800) -> tuple[bytes, ImageInfo]:
-    image = Image.open(path).convert("RGB")
+def render_image(
+    path: str, mode: str = "original", max_width: int = 1800, rotation: int = 0
+) -> tuple[bytes, ImageInfo]:
+    image = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     image.thumbnail((max_width, max_width * 2), Image.Resampling.LANCZOS)
-    output = apply_filter(image, mode)
+    output = rotate_clockwise(apply_filter(image, mode), rotation)
     payload = BytesIO()
     output.save(payload, format="JPEG", quality=92, optimize=True)
     return payload.getvalue(), ImageInfo(width=output.width, height=output.height, mode=mode)
@@ -37,13 +39,22 @@ def save_filtered_image(
     image_path: str,
     output_path: str | Path,
     mode: str = "original",
-    max_width: int = 1800,
+    max_width: int | None = 1800,
 ) -> ImageInfo:
-    image = Image.open(image_path).convert("RGB")
-    image.thumbnail((max_width, max_width * 2), Image.Resampling.LANCZOS)
+    image = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
+    if max_width:
+        image.thumbnail((max_width, max_width * 2), Image.Resampling.LANCZOS)
     output = apply_filter(image, mode)
-    output.save(output_path, format="JPEG", quality=92, optimize=True)
+    save_ocr_input(output, output_path)
     return ImageInfo(width=output.width, height=output.height, mode=mode)
+
+
+def save_ocr_input(image: Image.Image, output_path: str | Path) -> None:
+    """OCR inputs are saved losslessly (format follows the suffix, PNG expected)."""
+    if Path(output_path).suffix.lower() in {".jpg", ".jpeg"}:
+        image.save(output_path, format="JPEG", quality=92, optimize=True)
+    else:
+        image.save(output_path)
 
 
 def render_mask_overlay(
@@ -80,12 +91,13 @@ def render_sdk_crop(
     mode: str = "original",
     target_aspect_ratio: float = 85.6 / 54.0,
     output_max_pixels: int = 2_000_000,
+    rotation: int = 0,
 ) -> tuple[bytes, ImageInfo]:
     image = Image.open(image_path).convert("RGB")
     quad = order_quad(points)
     cropped = perspective_correct(image, quad, target_aspect_ratio=target_aspect_ratio)
     cropped = downscale_max_pixels(cropped, output_max_pixels)
-    output = apply_filter(cropped, mode)
+    output = rotate_clockwise(apply_filter(cropped, mode), rotation)
     payload = BytesIO()
     output.save(payload, format="JPEG", quality=92, optimize=True)
     return payload.getvalue(), ImageInfo(width=output.width, height=output.height, mode=f"sdk_crop_{mode}")
@@ -104,8 +116,14 @@ def save_sdk_crop(
     cropped = perspective_correct(image, quad, target_aspect_ratio=target_aspect_ratio)
     cropped = downscale_max_pixels(cropped, output_max_pixels)
     output = apply_filter(cropped, mode)
-    output.save(output_path, format="JPEG", quality=92, optimize=True)
+    save_ocr_input(output, output_path)
     return ImageInfo(width=output.width, height=output.height, mode=f"sdk_crop_{mode}")
+
+
+def rotate_clockwise(image: Image.Image, degrees: int) -> Image.Image:
+    """Same clockwise convention as the OCR request rotation."""
+    degrees %= 360
+    return image.rotate(-degrees, expand=True) if degrees else image
 
 
 def apply_filter(image: Image.Image, mode: str) -> Image.Image:

@@ -1,0 +1,2 @@
+# Optional dashboard engine; install using the dashboard's Python interpreter.
+easyocr==1.7.2

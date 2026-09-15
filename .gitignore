@@ -12,3 +12,7 @@ venv/
 benchmark/reports/*.json
 benchmark/reports/*.csv
 benchmark/generated/
+benchmark/uploads/
+benchmark/training/
+training/tesstrain/
+training/.venv/

@@ -3,19 +3,23 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from nid_ocr_lab.dashboard.filters import (
     FILTER_MODES,
+    ImageInfo,
     render_image,
     render_mask_overlay,
     render_sdk_crop,
@@ -23,14 +27,22 @@ from nid_ocr_lab.dashboard.filters import (
     save_sdk_crop,
 )
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
+from nid_ocr_lab.dashboard.uploads import MAX_UPLOAD_BYTES, delete_upload, list_uploads, save_upload, upload_samples
+from nid_ocr_lab.engines.easyocr import EasyOCREngine, is_available as easyocr_available
 from nid_ocr_lab.engines.gemini_vision import GeminiVisionEngine, status as gemini_status
 from nid_ocr_lab.engines.lmstudio_vision import LMStudioVisionEngine, status as lmstudio_status
 from nid_ocr_lab.engines.paddleocr import PaddleOCREngine, is_available as paddleocr_available
+from nid_ocr_lab.engines.tessdata import list_variants, model_version
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
 from nid_ocr_lab.models import FIELD_NAMES, FieldResult, NIDData, OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
+from nid_ocr_lab.training.dataset import crop_line, dataset_stats, save_run, save_training_lines
 
 STATIC_DIR = Path(__file__).with_name("static")
+SWEEP_PSMS = [3, 4, 6, 11]
+OSD_MIN_CONFIDENCE = 2.0
+RUN_CROP_PATTERN = re.compile(r"^/api/runs/([0-9a-z-]+)/crop$")
+UPLOAD_ITEM_PATTERN = re.compile(r"^/api/uploads/([0-9a-z-]+)$")
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -41,7 +53,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self.send_static("index.html")
         elif parsed.path == "/api/samples":
-            self.send_json(self.samples())
+            self.send_json(upload_samples() + self.samples())
+        elif parsed.path == "/api/uploads":
+            self.send_json(list_uploads())
+        elif parsed.path == "/api/training/datasets":
+            self.send_json(dataset_stats())
+        elif RUN_CROP_PATTERN.match(parsed.path):
+            self.send_run_crop(RUN_CROP_PATTERN.match(parsed.path).group(1), parsed.query)
         elif parsed.path == "/api/health":
             self.send_json(dataset_health())
         elif parsed.path == "/api/ocr/status":
@@ -64,8 +82,66 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/ocr/run":
             self.run_ocr()
+        elif parsed.path == "/api/uploads":
+            self.receive_upload()
+        elif parsed.path == "/api/training/lines":
+            self.save_lines()
         else:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        match = UPLOAD_ITEM_PATTERN.match(urlparse(self.path).path)
+        if not match:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+        try:
+            delete_upload(match.group(1))
+        except ValueError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json({"ok": True})
+
+    def read_body(self, limit: int) -> bytes:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > limit:
+            raise ValueError(f"Request body exceeds {limit // (1024 * 1024)} MB")
+        return self.rfile.read(length)
+
+    def receive_upload(self) -> None:
+        try:
+            data = self.read_body(MAX_UPLOAD_BYTES)
+            filename = unquote(self.headers.get("X-Filename", "upload"))
+            record = save_upload(filename, data)
+        except ValueError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json({"ok": True, "upload": record, "sample_id": f"upload:{record['id']}"})
+
+    def save_lines(self) -> None:
+        try:
+            payload = json.loads(self.read_body(5 * 1024 * 1024).decode("utf-8"))
+            saved = save_training_lines(
+                payload.get("dataset") or "",
+                payload.get("run_id") or "",
+                payload.get("card_id") or "",
+                payload.get("lines") or [],
+            )
+        except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json({"ok": True, "saved": saved, "datasets": dataset_stats()})
+
+    def send_run_crop(self, run_id: str, query_string: str) -> None:
+        query = parse_qs(query_string)
+        try:
+            bbox = {key: float(first(query, key) or "") for key in ("x", "y", "width", "height")}
+            image = crop_line(run_id, bbox)
+        except ValueError as exc:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        payload = BytesIO()
+        image.save(payload, format="PNG")
+        self.send_bytes(payload.getvalue(), "image/png")
 
     def samples(self) -> list[dict]:
         if DashboardHandler.index_cache is None:
@@ -76,11 +152,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         query = parse_qs(query_string)
         path = first(query, "path")
         mode = first(query, "mode") or "original"
-        if not path or mode not in FILTER_MODES:
+        rotation = preview_rotation(query)
+        if not path or mode not in FILTER_MODES or rotation is None:
             self.send_error(HTTPStatus.BAD_REQUEST, "Invalid image request")
             return
         try:
-            payload, _info = render_image(unquote(path), mode=mode)
+            payload, _info = render_image(unquote(path), mode=mode, rotation=rotation)
         except OSError:
             self.send_error(HTTPStatus.NOT_FOUND, "Image not found")
             return
@@ -126,7 +203,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, "No 4-point annotation quad found")
             return
         try:
-            payload, _info = render_sdk_crop(unquote(image_path), points, mode=mode)
+            rotation = preview_rotation(query)
+            if rotation is None:
+                raise ValueError("Invalid rotation")
+            payload, _info = render_sdk_crop(unquote(image_path), points, mode=mode, rotation=rotation)
         except (OSError, ValueError):
             self.send_error(HTTPStatus.NOT_FOUND, "SDK crop source not found")
             return
@@ -138,10 +218,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
         with suppress(BrokenPipeError, ConnectionResetError):
             self.wfile.write(payload)
 
-    def send_json(self, payload: object) -> None:
+    def send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        with suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(data)
+
+    def send_bytes(self, data: bytes, content_type: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         with suppress(BrokenPipeError, ConnectionResetError):
@@ -184,6 +273,11 @@ def first(query: dict[str, list[str]], key: str) -> str | None:
     return values[0] if values else None
 
 
+def preview_rotation(query: dict[str, list[str]]) -> int | None:
+    value = first(query, "rotate") or "0"
+    return int(value) if value in ("0", "90", "180", "270") else None
+
+
 def first_quad_points(annotation: dict) -> list[list[float]] | None:
     for shape in annotation.get("shapes", []):
         points = shape.get("points") or []
@@ -204,6 +298,15 @@ def ocr_status() -> dict:
                 "available": bool(tesseract_path),
                 "binary": tesseract_path,
                 "languages": tesseract_languages() if tesseract_path else [],
+                "variants": tesseract_variants() if tesseract_path else [],
+            },
+            {
+                "id": "easyocr",
+                "label": "EasyOCR",
+                "available": easyocr_available(),
+                "binary": "python package · CPU",
+                "languages": ["eng", "ben"],
+                "note": "Install requirements-easyocr.txt in the dashboard Python environment.",
             },
             {
                 "id": "paddleocr",
@@ -250,57 +353,117 @@ def tesseract_languages() -> list[str]:
     return [line.strip() for line in completed.stdout.splitlines()[1:] if line.strip()]
 
 
+def tesseract_variants() -> list[dict]:
+    variants = []
+    for variant in list_variants():
+        languages = variant.languages()
+        variants.append(
+            {
+                "id": variant.id,
+                "label": variant.label,
+                "directory": str(variant.directory),
+                "languages": languages,
+                "versions": {
+                    language: model_version(variant.model_path(language))
+                    for language in languages
+                    if language in ("ben", "eng") or variant.id.startswith("custom/")
+                },
+            }
+        )
+    return variants
+
+
 def run_ocr_payload(payload: dict) -> dict:
+    request_started = time.perf_counter()
     engine = payload.get("engine") or "tesseract"
     image_path = payload.get("image_path")
     annotation_path = payload.get("annotation_path")
     mode = payload.get("mode") or "enhance"
+    input_kind = payload.get("input") or "filter"
     language = payload.get("language") or "eng+ben"
-    rotation = payload.get("rotation") or "auto"
+    rotation = str(payload.get("rotation") or "auto")
     selected_model = payload.get("model") or None
     if not image_path:
         raise ValueError("image_path is required")
+    if rotation not in ("auto", "0", "90", "180", "270"):
+        raise ValueError("Rotation must be auto, 0, 90, 180, or 270")
 
     with tempfile.TemporaryDirectory(prefix="nid-ocr-dashboard-") as tmp:
-        filtered_path = Path(tmp) / "filtered.jpg"
-        input_mode = "filtered"
-        if annotation_path:
+        if input_kind == "as_is":
+            ocr_input = Path(tmp) / "input.png"
+            image_info = save_as_uploaded(image_path, ocr_input)
+            input_mode, mode = "as_uploaded", "none"
+        elif annotation_path:
+            ocr_input = Path(tmp) / "filtered.png"
             annotation = load_annotation(annotation_path) or {}
             points = first_quad_points(annotation)
             if not points:
                 raise ValueError("No 4-point annotation quad found")
-            image_info = save_sdk_crop(image_path, points, filtered_path, mode=mode)
+            image_info = save_sdk_crop(image_path, points, ocr_input, mode=mode)
             input_mode = "filter_panel_crop"
         else:
-            image_info = save_filtered_image(image_path, filtered_path, mode=mode)
+            ocr_input = Path(tmp) / "filtered.png"
+            image_info = save_filtered_image(image_path, ocr_input, mode=mode)
+            input_mode = "filtered"
+        label = f"{input_mode}_{mode}"
+        extra: dict = {}
         if engine == "tesseract":
-            ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_tesseract_with_rotation(
-                filtered_path,
+            tess = run_tesseract(
+                ocr_input,
                 language=language,
-                mode=f"{input_mode}_{mode}",
+                mode=label,
                 rotation=rotation,
+                variant=payload.get("tesseract_variant") or "system",
+                psm=int(payload.get("psm") or 6),
+                strategy=payload.get("strategy") or "single",
             )
-            parsed = OCRPipeline().parse_ocr_result(parse_ocr)
+            ocr, selected_rotation, selected_psm, candidates = tess["ocr"], tess["rotation"], tess["psm"], tess["candidates"]
+            parsed = OCRPipeline().parse_ocr_result(ocr)
+            extra = {"ocr_calls": tess["calls"], "orientation": tess["orientation"]}
+            extra["run_id"] = save_run(
+                tess["input_path"],
+                ocr_result_to_json(ocr),
+                {
+                    "sample_id": payload.get("sample_id"),
+                    "image_path": str(image_path),
+                    "input_mode": input_mode,
+                    "filter_mode": mode,
+                    "rotation": selected_rotation,
+                    "variant": ocr.metadata.get("variant"),
+                    "language": ocr.language,
+                    "psm": selected_psm,
+                },
+            )
+        elif engine == "easyocr":
+            degrees = 0 if rotation == "auto" else int(rotation)
+            easy_path = rotated_copy(ocr_input, degrees)
+            ocr = EasyOCREngine().recognize(
+                easy_path, language.split("+"),
+                preprocessing=f"{label}_rot{degrees}",
+                auto_rotate=rotation == "auto",
+            )
+            selected_rotation, selected_psm, candidates = degrees, None, []
+            parsed = OCRPipeline().parse_ocr_result(ocr)
         elif engine == "paddleocr":
             ocr, selected_rotation, selected_psm, candidates, parse_ocr = run_paddle_with_rotation(
-                filtered_path,
+                ocr_input,
                 language=language,
-                mode=f"{input_mode}_{mode}",
+                mode=label,
                 rotation=rotation,
             )
             parsed = OCRPipeline().parse_ocr_result(parse_ocr)
         elif engine == "lmstudio_vision":
             ocr, selected_rotation, selected_psm, candidates, fields = run_lmstudio_vision(
-                filtered_path,
-                mode=f"{input_mode}_{mode}",
+                ocr_input,
+                mode=label,
                 rotation=rotation,
                 selected_model=selected_model,
             )
             parsed = nid_data_from_vision_fields(fields, raw_text=ocr.full_text, source="lmstudio_vision")
         elif engine == "gemini_vision":
             ocr, selected_rotation, selected_psm, candidates, fields = run_gemini_vision(
-                filtered_path,
-                mode=f"{input_mode}_{mode}",
+                ocr_input,
+                mode=label,
                 rotation=rotation,
                 selected_model=selected_model,
             )
@@ -318,52 +481,128 @@ def run_ocr_payload(payload: dict) -> dict:
             "input_mode": input_mode,
             "filter_mode": mode,
         },
+        "request_latency_ms": (time.perf_counter() - request_started) * 1000,
         "rotation": selected_rotation,
         "psm": selected_psm,
         "rotation_candidates": candidates,
+        **extra,
         "ocr": ocr_result_to_json(ocr),
         "parsed": nid_data_to_json(parsed),
     }
 
 
-def run_tesseract_with_rotation(
+def save_as_uploaded(image_path: str, target: Path) -> ImageInfo:
+    """No crop, filter, or resize: only EXIF orientation, saved losslessly with DPI metadata kept."""
+    with Image.open(image_path) as source:
+        dpi = source.info.get("dpi")
+        image = ImageOps.exif_transpose(source)
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.save(target, **({"dpi": dpi} if dpi else {}))
+        return ImageInfo(width=image.width, height=image.height, mode="as_uploaded")
+
+
+def rotated_copy(source: Path, degrees: int) -> Path:
+    """Clockwise rotation into a sibling PNG; 0 degrees returns the original file untouched."""
+    degrees %= 360
+    if degrees == 0:
+        return source
+    target = source.with_name(f"{source.stem}-rot{degrees}.png")
+    if not target.exists():
+        with Image.open(source) as image:
+            dpi = image.info.get("dpi")
+            image.rotate(-degrees, expand=True).save(target, **({"dpi": dpi} if dpi else {}))
+    return target
+
+
+def orientation_score(ocr: OCRResult) -> float:
+    words = ocr.metadata.get("words") or []
+    confidences = [word["confidence"] for word in words if word.get("confidence") is not None]
+    if not confidences:
+        return 0.0
+    return (sum(confidences) / len(confidences)) * len(confidences)
+
+
+def run_tesseract(
     image_path: Path,
     language: str,
     mode: str,
     rotation: str,
-) -> tuple[OCRResult, int, int, list[dict], list[tuple[int, int, OCRResult]]]:
-    rotations = [0, 90, 180, 270] if rotation == "auto" else [int(rotation)]
-    psm_candidates = [6, 11, 12, 3]
+    variant: str,
+    psm: int,
+    strategy: str,
+) -> dict:
+    """Bounded Tesseract flow: one OSD pass (plus a 4-way check only if OSD cannot decide), then one OCR
+    call per requested PSM. Results are never concatenated across PSMs."""
     engine = TesseractEngine()
-    best = None
+    languages = language.split("+")
+    calls = 0
+    orientation: dict = {"method": "manual"}
+    reusable: dict[int, OCRResult] = {}
+
+    def recognize(path: Path, degrees: int, page_psm: int) -> OCRResult:
+        nonlocal calls
+        calls += 1
+        return engine.recognize(
+            path, languages, preprocessing=f"{mode}_rot{degrees}_psm{page_psm}", psm=page_psm, variant=variant
+        )
+
+    if rotation == "auto":
+        osd = engine.detect_orientation(image_path)
+        calls += 1
+        if osd and osd.confidence >= OSD_MIN_CONFIDENCE:
+            degrees = osd.rotate
+            orientation = {"method": "osd", "rotate": osd.rotate, "confidence": osd.confidence, "script": osd.script}
+        else:
+            scores = {}
+            for candidate in (0, 90, 180, 270):
+                result = recognize(rotated_copy(image_path, candidate), candidate, psm)
+                reusable[candidate] = result
+                scores[candidate] = round(orientation_score(result), 3)
+            degrees = max(scores, key=scores.get)
+            orientation = {
+                "method": "rotation-check",
+                "osd": None if osd is None else {"rotate": osd.rotate, "confidence": osd.confidence},
+                "scores": scores,
+                "score": "sum of word confidences",
+            }
+    else:
+        degrees = int(rotation)
+
+    input_path = rotated_copy(image_path, degrees)
     candidates = []
-    candidate_ocrs = []
-    for degrees in rotations:
-        rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
-        rotate_image(image_path, rotated_path, degrees)
-        for psm in psm_candidates:
-            ocr = engine.recognize(
-                rotated_path,
-                language.split("+"),
-                preprocessing=f"filtered_{mode}_rot{degrees}_psm{psm}",
-                psm=psm,
-            )
-            score = score_ocr_result(ocr)
-            candidate_ocrs.append((degrees, psm, ocr))
+    if strategy == "sweep":
+        best = None
+        for page_psm in SWEEP_PSMS:
+            result = reusable.get(degrees) if page_psm == psm and degrees in reusable else recognize(input_path, degrees, page_psm)
+            score = score_ocr_result(result)
             candidates.append(
                 {
                     "rotation": degrees,
-                    "psm": psm,
+                    "psm": page_psm,
                     "score": round(score, 4),
-                    "blocks": len(ocr.blocks),
-                    "text_preview": ocr.full_text[:160],
+                    "score_kind": "heuristic, not accuracy",
+                    "blocks": len(result.blocks),
+                    "latency_ms": round(result.latency_ms or 0),
+                    "text_preview": result.full_text[:160],
                 }
             )
             if best is None or score > best[0]:
-                best = (score, degrees, psm, ocr)
-    assert best is not None
-    selected = best[3]
-    return selected, best[1], best[2], candidates, combine_selected_rotation_ocr(selected, candidate_ocrs, best[1])
+                best = (score, page_psm, result)
+        assert best is not None
+        selected_psm, ocr = best[1], best[2]
+    else:
+        ocr = reusable.get(degrees) or recognize(input_path, degrees, psm)
+        selected_psm = psm
+    return {
+        "ocr": ocr,
+        "rotation": degrees,
+        "psm": selected_psm,
+        "candidates": candidates,
+        "calls": calls,
+        "orientation": orientation,
+        "input_path": input_path,
+    }
 
 
 def run_paddle_with_rotation(
@@ -377,8 +616,7 @@ def run_paddle_with_rotation(
     best = None
     candidates = []
     for degrees in rotations:
-        rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
-        rotate_image(image_path, rotated_path, degrees)
+        rotated_path = rotated_copy(image_path, degrees)
         ocr = engine.recognize(
             rotated_path,
             language.split("+"),
@@ -407,8 +645,7 @@ def run_lmstudio_vision(
     selected_model: str | None = None,
 ) -> tuple[OCRResult, int, None, list[dict], dict]:
     degrees = 0 if rotation == "auto" else int(rotation)
-    rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
-    rotate_image(image_path, rotated_path, degrees)
+    rotated_path = rotated_copy(image_path, degrees)
     fields, ocr = LMStudioVisionEngine().recognize_fields(
         rotated_path,
         preprocessing=f"filtered_{mode}_rot{degrees}",
@@ -434,8 +671,7 @@ def run_gemini_vision(
     selected_model: str | None = None,
 ) -> tuple[OCRResult, int, None, list[dict], dict]:
     degrees = 0 if rotation == "auto" else int(rotation)
-    rotated_path = image_path.with_name(f"filtered-rot{degrees}.jpg")
-    rotate_image(image_path, rotated_path, degrees)
+    rotated_path = rotated_copy(image_path, degrees)
     fields, ocr = GeminiVisionEngine().recognize_fields(
         rotated_path,
         preprocessing=f"filtered_{mode}_rot{degrees}",
@@ -470,42 +706,6 @@ def nid_data_from_vision_fields(fields: dict, raw_text: str, source: str) -> NID
             source=source,
         )
     return NIDData(raw_text=raw_text, **values)
-
-
-def combine_selected_rotation_ocr(
-    selected: OCRResult,
-    candidates: list[tuple[int, int, OCRResult]],
-    selected_rotation: int,
-) -> OCRResult:
-    same_rotation = [ocr for degrees, _psm, ocr in candidates if degrees == selected_rotation]
-    if not same_rotation:
-        return selected
-    full_text = "\n".join(ocr.full_text for ocr in same_rotation if ocr.full_text)
-    blocks = []
-    for ocr in same_rotation:
-        blocks.extend(ocr.blocks)
-    metadata = dict(selected.metadata)
-    metadata["field_parse_sources"] = [
-        {"preprocessing": ocr.preprocessing, "psm": ocr.metadata.get("psm")}
-        for ocr in same_rotation
-    ]
-    return OCRResult(
-        blocks=blocks,
-        full_text=full_text,
-        engine=selected.engine,
-        language=selected.language,
-        preprocessing=f"{selected.preprocessing}_field_parse_union",
-        latency_ms=selected.latency_ms,
-        metadata=metadata,
-    )
-
-
-def rotate_image(source: Path, target: Path, degrees: int) -> None:
-    with Image.open(source) as image:
-        if degrees == 0:
-            image.save(target, format="JPEG", quality=92, optimize=True)
-            return
-        image.rotate(-degrees, expand=True).save(target, format="JPEG", quality=92, optimize=True)
 
 
 def score_ocr_result(ocr: object) -> float:

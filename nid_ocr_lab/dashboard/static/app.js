@@ -7,6 +7,7 @@ const state = {
   ocrStatus: null,
   overlay: true,
   fit: true,
+  autoRotation: null,
 };
 
 const sampleList = document.querySelector("#sampleList");
@@ -37,22 +38,49 @@ const ocrJsonOutput = document.querySelector("#ocrJsonOutput");
 const engineRawOutput = document.querySelector("#engineRawOutput");
 const toggleOverlay = document.querySelector("#toggleOverlay");
 const fitMode = document.querySelector("#fitMode");
+const ocrInputSelect = document.querySelector("#ocrInputSelect");
+const ocrPsmLabel = document.querySelector("#ocrPsmLabel");
+const ocrPsmSelect = document.querySelector("#ocrPsmSelect");
+const ocrStrategyLabel = document.querySelector("#ocrStrategyLabel");
+const ocrStrategySelect = document.querySelector("#ocrStrategySelect");
+const uploadZone = document.querySelector("#uploadZone");
+const uploadInput = document.querySelector("#uploadInput");
+const uploadButton = document.querySelector("#uploadButton");
+const uploadStatus = document.querySelector("#uploadStatus");
+const labelPanel = document.querySelector("#labelPanel");
+const labelRows = document.querySelector("#labelRows");
+const labelDataset = document.querySelector("#labelDataset");
+const labelCardId = document.querySelector("#labelCardId");
+const labelStatus = document.querySelector("#labelStatus");
+const labelSave = document.querySelector("#labelSave");
+const labelSelectAll = document.querySelector("#labelSelectAll");
+const sidebar = document.querySelector(".sidebar");
+const ocrPickFileButton = document.querySelector("#ocrPickFileButton");
+const ocrFileInfo = document.querySelector("#ocrFileInfo");
+const filterHeading = document.querySelector("#filterHeading");
 
 async function boot() {
-  const response = await fetch("/api/samples");
-  state.samples = await response.json();
   const healthResponse = await fetch("/api/health");
   state.health = await healthResponse.json();
   const ocrStatusResponse = await fetch("/api/ocr/status");
   state.ocrStatus = await ocrStatusResponse.json();
-  state.filtered = state.samples;
-  sampleCount.textContent = state.samples.length;
   healthDetails.textContent = JSON.stringify(state.health, null, 2);
   renderOcrStatus();
-  renderList();
+  await loadSamples();
   if (state.samples.length) {
     selectSample(state.samples[0].id);
   }
+}
+
+async function loadSamples() {
+  const response = await fetch("/api/samples");
+  state.samples = await response.json();
+  sampleCount.textContent = state.samples.length;
+  renderList();
+}
+
+function isUpload(sample) {
+  return sample?.source === "upload";
 }
 
 function renderOcrStatus() {
@@ -70,6 +98,25 @@ function renderOcrStatus() {
   }
   const modelText = isVisionEngine(engine.id) && ocrModelSelect.value ? ` · model ${ocrModelSelect.value}` : "";
   ocrStatus.textContent = `${engine.label} ready · ${engine.languages.length || 0} language options found${modelText}`;
+  if (engine.id === "tesseract") {
+    if (!Array.isArray(engine.variants)) {
+      ocrStatus.textContent = "The dashboard server is running older code than this page. Restart it (Ctrl+C, then bash scripts/run_dashboard.sh).";
+      runOcrButton.disabled = true;
+      return;
+    }
+    const variant = selectedTesseractVariant();
+    const versions = Object.entries(variant?.versions || {}).map(([lang, version]) => `${lang} ${version || "?"}`).join(" · ");
+    ocrStatus.textContent = `Tesseract · ${variant?.label || "system"} · ${versions || "no model info"} · auto rotation = OSD, 4-way check only if OSD is unsure`;
+    const missing = ocrLanguageSelect.value.split("+").filter((lang) => !(variant?.languages || []).includes(lang));
+    if (missing.length) {
+      ocrStatus.textContent = `Model folder "${variant?.label}" has no ${missing.join(", ")} model. Pick another language or run scripts/fetch_tessdata.sh.`;
+      runOcrButton.disabled = true;
+      return;
+    }
+  }
+  if (engine.id === "easyocr") {
+    ocrStatus.textContent = "EasyOCR · Bengali + English · CPU · first run loads models. Auto rotates text boxes; choose 0 for fastest upright-card lookup.";
+  }
   runOcrButton.disabled = false;
 }
 
@@ -81,7 +128,35 @@ function isVisionEngine(engineId) {
   return engineId === "gemini_vision" || engineId === "lmstudio_vision";
 }
 
+function selectedTesseractVariant() {
+  const engine = state.ocrStatus?.engines?.find((item) => item.id === "tesseract");
+  return (engine?.variants || []).find((variant) => variant.id === ocrModelSelect.value) || engine?.variants?.[0];
+}
+
 function renderModelOptions(engine) {
+  const isTesseract = engine?.id === "tesseract";
+  ocrPsmLabel.hidden = !isTesseract;
+  ocrStrategyLabel.hidden = !isTesseract;
+  if (isTesseract) {
+    ocrModelLabel.hidden = false;
+    ocrModelSelect.disabled = false;
+    const previous = ocrModelSelect.value;
+    const variants = engine.variants || [];
+    if (ocrModelSelect.dataset.engine !== "tesseract" || ocrModelSelect.options.length !== variants.length) {
+      ocrModelSelect.innerHTML = "";
+      for (const variant of variants) {
+        const option = document.createElement("option");
+        option.value = variant.id;
+        option.textContent = variant.label;
+        ocrModelSelect.appendChild(option);
+      }
+      ocrModelSelect.dataset.engine = "tesseract";
+      const preferred = variants.some((variant) => variant.id === "best") ? "best" : variants[0]?.id;
+      ocrModelSelect.value = variants.some((variant) => variant.id === previous) ? previous : (preferred || "");
+    }
+    return;
+  }
+  ocrModelSelect.dataset.engine = "";
   const show = Boolean(engine && isVisionEngine(engine.id));
   ocrModelLabel.hidden = !show;
   ocrModelSelect.disabled = !show;
@@ -109,12 +184,28 @@ function renderList() {
   visibleCount.textContent = state.filtered.length;
   sampleList.innerHTML = "";
   for (const sample of state.filtered) {
+    const row = document.createElement("div");
+    row.className = "sample-row";
     const button = document.createElement("button");
     button.type = "button";
     button.className = `sample-item ${state.selected?.id === sample.id ? "active" : ""}`;
-    button.innerHTML = `<strong>${sample.id}</strong><span>${sample.source} · ${badges(sample)}</span>`;
+    if (isUpload(sample)) {
+      button.innerHTML = `<strong>${escapeHtml(sample.filename)}</strong><span>upload · ${sample.kind} · ${Object.keys(sample.images).length} page(s)</span>`;
+    } else {
+      button.innerHTML = `<strong>${sample.id}</strong><span>${sample.source} · ${badges(sample)}</span>`;
+    }
     button.addEventListener("click", () => selectSample(sample.id));
-    sampleList.appendChild(button);
+    row.appendChild(button);
+    if (isUpload(sample)) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "sample-delete";
+      remove.title = "Delete this upload from benchmark/uploads";
+      remove.textContent = "✕";
+      remove.addEventListener("click", () => deleteUpload(sample));
+      row.appendChild(remove);
+    }
+    sampleList.appendChild(row);
   }
 }
 
@@ -131,6 +222,8 @@ function badges(sample) {
 async function selectSample(id) {
   state.selected = state.samples.find((sample) => sample.id === id);
   state.annotation = null;
+  ocrInputSelect.value = isUpload(state.selected) || !state.selected?.annotation ? "as_is" : "filter";
+  labelCardId.value = isUpload(state.selected) ? state.selected.upload_id : (state.selected?.id || "");
   renderList();
   await loadAnnotation();
   renderSample();
@@ -145,7 +238,11 @@ async function loadAnnotation() {
 function renderSample() {
   const sample = state.selected;
   if (!sample) return;
-  sampleTitle.textContent = `Sample ${sample.id}`;
+  sampleTitle.textContent = isUpload(sample) ? sample.filename : `Sample ${sample.id}`;
+  ocrFileInfo.classList.toggle("current", isUpload(sample));
+  ocrFileInfo.textContent = isUpload(sample)
+    ? `Selected upload: ${sample.filename} · ${sample.kind} · ${Object.keys(sample.images).length} page(s) — pick the page in Source, then Run OCR.`
+    : `Current input: SmartScan sample ${sample.id}. Choose a file to OCR your own image or PDF instead.`;
   sampleMeta.textContent = `${sample.source} · ${badges(sample)}`;
   renderSourceOptions(sample);
   fileDetails.textContent = JSON.stringify(sample, null, 2);
@@ -203,18 +300,41 @@ function updateImages() {
   const path = sourceSelect.value;
   if (!path) return;
   sourceImage.src = imageUrl(path, "original");
-  if (filterSelect.value === "mask_overlay") {
+  const asUploaded = ocrInputSelect.value === "as_is";
+  filterSelect.disabled = asUploaded;
+  const rotation = previewRotation();
+  const maskOverlay = !asUploaded && filterSelect.value === "mask_overlay";
+  if (asUploaded) {
+    filterImage.src = imageUrl(path, "original", rotation.degrees);
+  } else if (maskOverlay) {
     const mask = pairedMaskForSelectedSource();
     filterImage.src = mask ? maskOverlayUrl(path, mask) : imageUrl(path, "original");
   } else if (state.selected?.annotation) {
-    filterImage.src = sdkCropUrl(cropBaseImagePath(), state.selected.annotation, filterSelect.value);
+    filterImage.src = sdkCropUrl(cropBaseImagePath(), state.selected.annotation, filterSelect.value, rotation.degrees);
   } else {
-    filterImage.src = imageUrl(path, filterSelect.value);
+    filterImage.src = imageUrl(path, filterSelect.value, rotation.degrees);
   }
+  const base = asUploaded ? "OCR input" : "Filter";
+  filterHeading.textContent = maskOverlay ? base : `${base} · ${rotation.label}`;
 }
 
-function imageUrl(path, mode) {
-  return `/image?path=${encodeURIComponent(path)}&mode=${encodeURIComponent(mode)}&t=${Date.now()}`;
+function previewKey() {
+  return [state.selected?.id, sourceSelect.value, ocrInputSelect.value, filterSelect.value].join("|");
+}
+
+function previewRotation() {
+  const value = ocrRotationSelect.value;
+  if (value !== "auto") {
+    return { degrees: Number(value), label: `rotated ${value}°` };
+  }
+  if (state.autoRotation?.key === previewKey()) {
+    return { degrees: state.autoRotation.degrees, label: `auto → ${state.autoRotation.degrees}° (last OCR)` };
+  }
+  return { degrees: 0, label: "auto (decided when OCR runs)" };
+}
+
+function imageUrl(path, mode, rotation = 0) {
+  return `/image?path=${encodeURIComponent(path)}&mode=${encodeURIComponent(mode)}&rotate=${rotation}&t=${Date.now()}`;
 }
 
 function maskOverlayUrl(imagePath, maskPath) {
@@ -222,11 +342,12 @@ function maskOverlayUrl(imagePath, maskPath) {
   return `/mask-overlay?${query.toString()}`;
 }
 
-function sdkCropUrl(imagePath, annotationPath, mode) {
+function sdkCropUrl(imagePath, annotationPath, mode, rotation = 0) {
   const query = new URLSearchParams({
     image: imagePath,
     annotation: annotationPath,
     mode,
+    rotate: String(rotation),
     t: String(Date.now()),
   });
   return `/sdk-crop?${query.toString()}`;
@@ -314,7 +435,32 @@ search.addEventListener("input", renderList);
 window.addEventListener("resize", drawOverlay);
 ocrEngineSelect.addEventListener("change", renderOcrStatus);
 ocrModelSelect.addEventListener("change", renderOcrStatus);
+ocrLanguageSelect.addEventListener("change", renderOcrStatus);
+ocrInputSelect.addEventListener("change", updateImages);
+ocrRotationSelect.addEventListener("change", updateImages);
 runOcrButton.addEventListener("click", runOcr);
+uploadButton.addEventListener("click", () => uploadInput.click());
+ocrPickFileButton.addEventListener("click", () => uploadInput.click());
+uploadInput.addEventListener("change", () => uploadFiles([...uploadInput.files]));
+labelSave.addEventListener("click", saveLabeledLines);
+labelSelectAll.addEventListener("click", () => {
+  const boxes = [...labelRows.querySelectorAll("input[type=checkbox]")];
+  const next = !boxes.every((box) => box.checked);
+  boxes.forEach((box) => { box.checked = next; });
+});
+for (const eventName of ["dragenter", "dragover"]) {
+  sidebar.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    uploadZone.classList.add("dragging");
+  });
+}
+for (const eventName of ["dragleave", "drop"]) {
+  sidebar.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    uploadZone.classList.remove("dragging");
+  });
+}
+sidebar.addEventListener("drop", (event) => uploadFiles([...(event.dataTransfer?.files || [])]));
 
 toggleOverlay.addEventListener("click", () => {
   state.overlay = !state.overlay;
@@ -333,14 +479,58 @@ fitMode.addEventListener("click", () => {
 
 boot();
 
+async function uploadFiles(files) {
+  if (!files.length) return;
+  let lastSampleId = null;
+  for (const [index, file] of files.entries()) {
+    uploadStatus.textContent = `Uploading ${index + 1}/${files.length}: ${file.name}…`;
+    ocrFileInfo.textContent = uploadStatus.textContent;
+    try {
+      const response = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": encodeURIComponent(file.name) },
+        body: file,
+      });
+      const result = await response.json();
+      if (!result.ok) {
+        uploadStatus.textContent = `${file.name}: ${result.error}`;
+        continue;
+      }
+      lastSampleId = result.sample_id;
+      uploadStatus.textContent = `Uploaded ${file.name} · ${result.upload.pages.length} page(s)`;
+    } catch (error) {
+      uploadStatus.textContent = `${file.name}: upload failed (${error})`;
+    }
+  }
+  uploadInput.value = "";
+  search.value = "";
+  await loadSamples();
+  if (lastSampleId) selectSample(lastSampleId);
+}
+
+async function deleteUpload(sample) {
+  if (!window.confirm(`Delete upload "${sample.filename}" from benchmark/uploads?`)) return;
+  const response = await fetch(`/api/uploads/${encodeURIComponent(sample.upload_id)}`, { method: "DELETE" });
+  const result = await response.json();
+  if (!result.ok) {
+    uploadStatus.textContent = result.error || "Delete failed";
+    return;
+  }
+  uploadStatus.textContent = `Deleted ${sample.filename}`;
+  const wasSelected = state.selected?.id === sample.id;
+  await loadSamples();
+  if (wasSelected && state.samples.length) selectSample(state.samples[0].id);
+}
+
 async function runOcr() {
-  const imagePath = state.selected?.annotation ? cropBaseImagePath() : sourceSelect.value;
+  const asUploaded = ocrInputSelect.value === "as_is";
+  const imagePath = !asUploaded && state.selected?.annotation ? cropBaseImagePath() : sourceSelect.value;
   if (!imagePath) {
     setOcrMessage("No image is selected.");
     return;
   }
   const mode = filterSelect.value === "mask_overlay" ? "enhance" : filterSelect.value;
-  setOcrMessage("Running OCR...");
+  setOcrMessage(ocrEngineSelect.value === "easyocr" ? "Running EasyOCR… first use may download/load models; later runs reuse them." : "Running OCR...");
   runOcrButton.disabled = true;
   try {
     const response = await fetch("/api/ocr/run", {
@@ -350,10 +540,14 @@ async function runOcr() {
         engine: ocrEngineSelect.value,
         language: ocrLanguageSelect.value,
         rotation: ocrRotationSelect.value,
-        model: ocrModelSelect.disabled ? null : ocrModelSelect.value,
+        model: ocrModelSelect.disabled || ocrEngineSelect.value === "tesseract" ? null : ocrModelSelect.value,
+        tesseract_variant: ocrEngineSelect.value === "tesseract" ? ocrModelSelect.value : null,
+        psm: ocrPsmSelect.value,
+        strategy: ocrStrategySelect.value,
+        input: ocrInputSelect.value,
         mode,
         image_path: imagePath,
-        annotation_path: state.selected?.annotation || null,
+        annotation_path: asUploaded ? null : (state.selected?.annotation || null),
         sample_id: state.selected.id,
       }),
     });
@@ -363,6 +557,10 @@ async function runOcr() {
       return;
     }
     renderOcrResult(result);
+    if (ocrRotationSelect.value === "auto" && Number.isInteger(result.rotation)) {
+      state.autoRotation = { key: previewKey(), degrees: result.rotation };
+      updateImages();
+    }
   } catch (error) {
     setOcrMessage(`OCR request failed: ${error}`);
   } finally {
@@ -371,6 +569,8 @@ async function runOcr() {
 }
 
 function setOcrMessage(message) {
+  labelPanel.hidden = true;
+  labelRows.innerHTML = "";
   ocrSummaryOutput.innerHTML = `<span class="chip muted">${escapeHtml(message)}</span>`;
   parsedFieldsOutput.innerHTML = "";
   rawTextOutput.textContent = "";
@@ -384,6 +584,104 @@ function renderOcrResult(result) {
   rawTextOutput.textContent = result.ocr?.full_text || result.parsed?.raw_text || "";
   ocrJsonOutput.textContent = JSON.stringify(result.ocr || {}, null, 2);
   engineRawOutput.textContent = formatRawEngineResponse(result.ocr);
+  renderLabelPanel(result);
+}
+
+function renderLabelPanel(result) {
+  const blocks = result.ocr?.blocks || [];
+  labelPanel.hidden = !(result.run_id && blocks.length);
+  labelRows.innerHTML = "";
+  labelStatus.textContent = "";
+  if (labelPanel.hidden) return;
+  labelPanel.dataset.runId = result.run_id;
+  blocks.forEach((block, index) => {
+    if (!block.bounding_box) return;
+    const box = block.bounding_box;
+    const query = new URLSearchParams({ x: box.x, y: box.y, width: box.width, height: box.height });
+    const row = document.createElement("div");
+    row.className = "label-row";
+    row.dataset.index = String(index);
+    row.dataset.ocrText = block.text;
+    row.dataset.bbox = JSON.stringify(box);
+    row.innerHTML = `
+      <input type="checkbox" title="Include this line">
+      <img alt="line ${index + 1}" loading="lazy" src="/api/runs/${encodeURIComponent(result.run_id)}/crop?${query}">
+      <input type="text" dir="auto" spellcheck="false">
+      <select title="Script">
+        <option value="ben">Bengali</option>
+        <option value="eng">English</option>
+        <option value="digits">Digits</option>
+      </select>
+      <span class="conf">${block.confidence == null ? "–" : Math.round(block.confidence * 100) + "%"}</span>`;
+    const text = row.querySelector("input[type=text]");
+    const checkbox = row.querySelector("input[type=checkbox]");
+    text.value = block.text;
+    row.querySelector("select").value = guessScript(block.text);
+    text.addEventListener("input", () => {
+      row.classList.toggle("edited", text.value !== block.text);
+      checkbox.checked = true;
+    });
+    labelRows.appendChild(row);
+  });
+  refreshDatasetStatus();
+}
+
+function guessScript(text) {
+  const bengali = (text.match(/[\u0980-\u09FF]/g) || []).length;
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  if (bengali && bengali >= latin) return "ben";
+  if (latin) return "eng";
+  return /\d/.test(text) ? "digits" : "eng";
+}
+
+async function refreshDatasetStatus(prefix = "") {
+  try {
+    const stats = await (await fetch("/api/training/datasets")).json();
+    const current = stats.find((item) => item.dataset === labelDataset.value);
+    const summary = current
+      ? `${current.dataset}: ${current.lines} lines from ${current.cards} card(s) · ${Object.entries(current.scripts).map(([k, v]) => `${k} ${v}`).join(", ")}`
+      : `${labelDataset.value}: no lines saved yet`;
+    labelStatus.textContent = `${prefix}${summary}. Tick only lines whose text you verified exactly.`;
+  } catch (error) {
+    labelStatus.textContent = `${prefix}Could not load dataset stats (${error})`;
+  }
+}
+
+async function saveLabeledLines() {
+  const rows = [...labelRows.querySelectorAll(".label-row")].filter((row) => row.querySelector("input[type=checkbox]").checked);
+  if (!rows.length) {
+    labelStatus.textContent = "Tick at least one verified line.";
+    return;
+  }
+  const lines = rows.map((row) => ({
+    index: Number(row.dataset.index),
+    text: row.querySelector("input[type=text]").value,
+    ocr_text: row.dataset.ocrText,
+    script: row.querySelector("select").value,
+    bounding_box: JSON.parse(row.dataset.bbox),
+  }));
+  labelSave.disabled = true;
+  try {
+    const response = await fetch("/api/training/lines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataset: labelDataset.value,
+        run_id: labelPanel.dataset.runId,
+        card_id: labelCardId.value,
+        lines,
+      }),
+    });
+    const result = await response.json();
+    if (!result.ok) {
+      labelStatus.textContent = result.error || "Save failed";
+      return;
+    }
+    rows.forEach((row) => { row.querySelector("input[type=checkbox]").checked = false; });
+    await refreshDatasetStatus(`Saved ${result.saved.length} line(s). `);
+  } finally {
+    labelSave.disabled = false;
+  }
 }
 
 function formatRawEngineResponse(ocr) {
@@ -399,7 +697,8 @@ function formatOcrSummary(result) {
   const candidates = (result.rotation_candidates || [])
     .map((candidate) => {
       const psm = candidate.psm === null || candidate.psm === undefined ? "" : ` psm ${candidate.psm}`;
-      return `rot ${candidate.rotation}${psm}: ${candidate.score}`;
+      const kind = candidate.score_kind ? " (heuristic)" : "";
+      return `rot ${candidate.rotation}${psm}: ${candidate.score}${kind}`;
     })
     .join(" · ");
   const chips = [
@@ -412,16 +711,35 @@ function formatOcrSummary(result) {
   if (result.psm !== null && result.psm !== undefined) {
     chips.push(chip(`PSM ${result.psm}`));
   }
-  const model = result.ocr?.metadata?.model;
+  const meta = result.ocr?.metadata || {};
+  if (result.ocr?.engine === "tesseract") {
+    chips.push(chip(`Model ${meta.variant}`));
+    const versions = (meta.models || []).map((item) => `${item.language}: ${item.version || "?"}`).join(" · ");
+    if (versions) chips.push(chip(versions, "wide"));
+    chips.push(chip(`${result.ocr_calls} OCR call(s)`));
+    if (meta.dpi) chips.push(chip(`DPI ${meta.dpi} (${meta.dpi_source})`));
+    const orientation = result.orientation || {};
+    const orientationText = orientation.method === "osd"
+      ? `OSD rotate ${orientation.rotate} (conf ${orientation.confidence})`
+      : orientation.method === "rotation-check"
+        ? `OSD unsure → 4-way check ${JSON.stringify(orientation.scores)}`
+        : "manual rotation";
+    chips.push(chip(orientationText, "wide"));
+  }
+  const model = result.ocr?.engine === "tesseract" ? null : result.ocr?.metadata?.model;
   chips.push(
-    chip(`${Math.round(result.ocr?.latency_ms || 0)} ms`),
+    chip(`${Math.round(result.request_latency_ms ?? result.ocr?.latency_ms ?? 0)} ms total`),
     chip(result.ocr?.engine || ""),
     chip(result.ocr?.language || ""),
   );
   if (model) {
     chips.push(chip(`Model ${model}`));
   }
-  chips.push(chip(candidates || "No rotation candidates", "wide"));
+  if (result.ocr?.metadata?.rotation_strategy) {
+    chips.push(chip(result.ocr.metadata.rotation_strategy, "wide"));
+    chips.push(chip(result.ocr.metadata.reader_cached ? "Reader reused" : "Reader initialized"));
+  }
+  chips.push(chip(candidates || (result.ocr?.engine === "easyocr" ? "Single detection pass" : "No sweep candidates"), "wide"));
   return chips.join("");
 }
 
@@ -461,3 +779,5 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+labelDataset.addEventListener("change", () => refreshDatasetStatus());
