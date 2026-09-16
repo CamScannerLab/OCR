@@ -155,6 +155,43 @@ class NIDFieldRefinementTests(unittest.TestCase):
         result = refine_nid_fields(None, self.image, page, variant="best", workdir=self.workdir, reader=FakeReader())
         self.assertEqual(result.full_text.splitlines()[0], "গণপ্রজাতন্ত্রী")
 
+    def test_noise_before_first_label_and_merged_rows_are_located(self):
+        words = [
+            word("সে", 1, 20, 8),
+            word("গল", 12, 20, 10),
+            word("সে", 25, 20, 8),
+            word("শ", 36, 20, 8),
+            word("পপ", 47, 20, 10),
+            word("৷", 60, 20, 5),
+            word("লাম:", 70, 20, 28),
+            word("ডনিয়েল", 105, 20, 48),
+            word("ত্রিপুরা", 158, 20, 48),
+            word("Name:", 215, 20, 42),
+            word("Doniel", 262, 20, 48),
+            word("Tripura", 315, 20, 54),
+            word("পিতা:", 15, 52, 31, line=2),
+            word("মসাধন", 68, 52, 45, line=2),
+            word("ত্রিপুরা", 118, 52, 48, line=2),
+            word("মাতা:", 15, 84, 31, line=3),
+            word("নিরাজিতা", 68, 84, 56, line=3),
+            word("ত্রিপুরা", 130, 84, 48, line=3),
+            word("Date", 15, 116, 35, line=4),
+            word("of", 55, 116, 15, line=4),
+            word("Birth:", 75, 116, 38, line=4),
+            word("28", 118, 116, 18, line=4),
+            word("May", 140, 116, 31, line=4),
+            word("2001", 176, 116, 34, line=4),
+            word("ID", 15, 148, 15, line=5),
+            word("NO:", 35, 148, 28, line=5),
+            word("8263067046", 68, 148, 93, line=5),
+        ]
+        page = OCRResult(blocks=[], full_text="", engine="tesseract", metadata={"words": words})
+        result = refine_nid_fields(None, self.image, page, variant="best", workdir=self.workdir, reader=FakeReader())
+        fields = {item["field"]: item for item in result.metadata["fields"]}
+
+        self.assertEqual(fields["name_bangla"]["candidates"][0]["text"], "ডনিয়েল ত্রিপুরা")
+        self.assertEqual(fields["name_english"]["text"], "Doniel Tripura")
+
 
 class NIDInkFilterTests(unittest.TestCase):
     def test_emblem_yellow_turns_white_and_ink_stays_dark(self):

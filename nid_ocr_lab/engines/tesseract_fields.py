@@ -192,6 +192,25 @@ def match_row(words: list[dict[str, Any]], row: NIDRow) -> int | None:
     return None
 
 
+def find_row_start(words: list[dict[str, Any]], row: NIDRow) -> int | None:
+    """Find a row label, even when Tesseract prepends noise or merges several rows into one line."""
+    start = match_row(words, row)
+    if start is not None:
+        return start
+    for index, word in enumerate(words):
+        if normalize_label_word(word["text"]) in row.aliases:
+            return index
+    return None
+
+
+def next_row_start(words: list[dict[str, Any]], start: int) -> int | None:
+    """First later NID label in a merged line; values stop before it."""
+    for index in range(start + 1, len(words)):
+        if any(normalize_label_word(words[index]["text"]) in row.aliases for row in NID_ROWS):
+            return index
+    return None
+
+
 def value_below(ordered: list[tuple[tuple[int, ...], list[dict[str, Any]]]], position: int):
     """The next line, when it holds this row's value: some NID cards print the label on its own line."""
     if position + 1 >= len(ordered):
@@ -221,14 +240,15 @@ def locate_rows(lines: dict[tuple[int, ...], list[dict[str, Any]]], image_size: 
     for row_index, row in enumerate(NID_ROWS):
         for position, (key, words) in enumerate(ordered):
             left, top, right, bottom = box_edges(words)
-            if top <= last_top or key in claimed:
+            if top < last_top or (key in claimed and next_row_start(words, 0) is None):
                 continue
-            start = match_row(words, row)
+            start = find_row_start(words, row)
             if start is None:
                 continue
             count = label_length(words, start, row)
             label_words = words[start : start + count]
-            value_words = words[start + count :]
+            next_start = next_row_start(words, start + count - 1)
+            value_words = words[start + count : next_start]
             label_right = box_edges(label_words)[2]
             height = bottom - top
             value_key = None

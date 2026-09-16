@@ -48,6 +48,19 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parse("Date of Birth: 05/11/1985").date_of_birth.value, "1985-11-05")
         self.assertIsNone(parse("Date of Bir h: 28 May 001").date_of_birth.value)
 
+    def test_noisy_merged_nid_line_uses_label_aliases(self):
+        result = parse(
+            "সে গল সে শ পপ ৷ লাম: ডনিয়েল ত্রিপুরা Name: 00191700798 "
+            "পিতা: মসাধন ব্রিপুরা মাতা: Fanfare খরিপুরা Date of Birth: 28 May 2001 "
+            "ID NO: 8263067046 —_— আআ ঢ"
+        )
+        self.assertEqual(result.name_bangla.value, "ডনিয়েল ত্রিপুরা")
+        self.assertEqual(result.father_name_bangla.value, "মসাধন ব্রিপুরা")
+        self.assertEqual(result.date_of_birth.value, "2001-05-28")
+        self.assertEqual(result.nid_number.value, "8263067046")
+        self.assertIsNone(result.name_english.value)
+        self.assertIsNone(result.mother_name_bangla.value)
+
 
 class EvaluationTests(unittest.TestCase):
     def test_unlabeled_fields_are_not_counted(self):

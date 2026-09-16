@@ -29,8 +29,8 @@ LETTER_CLASS = f"A-Za-z{BENGALI_RANGE}'’"
 
 # (field, labels, expected script). English labels match case-insensitively.
 LABELED_FIELDS = [
-    ("name_bangla", ["নাম"], "ben"),
-    ("name_english", ["name"], "eng"),
+    ("name_bangla", ["নাম", "লাম"], "ben"),
+    ("name_english", ["name", "neme", "narne", "nane"], "eng"),
     ("father_name_bangla", ["পিতা"], "ben"),
     ("father_name_english", ["father's name", "father"], "eng"),
     ("mother_name_bangla", ["মাতা"], "ben"),
@@ -43,8 +43,8 @@ LABELED_FIELDS = [
 RELATION_WORDS = ("father", "mother", "husband", "spouse", "পিতা", "মাতা", "স্বামী", "স্ত্রী")
 
 LABEL_WORDS = {
-    "date", "birth", "id", "no", "name", "father", "mother", "address",
-    "নাম", "পিতা", "মাতা", "ঠিকানা", "জন্ম", "তারিখ",
+    "date", "birth", "id", "no", "name", "neme", "narne", "nane", "father", "mother", "address",
+    "নাম", "লাম", "পিতা", "মাতা", "ঠিকানা", "জন্ম", "তারিখ",
 }
 
 
@@ -167,7 +167,7 @@ def find_labeled_value(lines: list[str], labels: list[str], script: str) -> Fiel
         match = next((found for label in labels if (found := label_match(line, label))), None)
         if not match:
             continue
-        inline = normalize_space(line[match.end():]).strip(":： ")
+        inline = normalize_space(trim_at_next_label(line[match.end():])).strip(":： ")
         if inline:
             candidate, source = inline, "label-inline"
         else:
@@ -178,6 +178,20 @@ def find_labeled_value(lines: list[str], labels: list[str], script: str) -> Fiel
             return empty_field(source=f"{source}-script-mismatch")
         return FieldResult(raw_value=candidate, confidence=0.55, needs_review=True, source=source)
     return empty_field()
+
+
+def trim_at_next_label(value: str) -> str:
+    next_label = None
+    for _field, labels, _script in LABELED_FIELDS:
+        for label in labels:
+            match = label_match(value, label)
+            if match and (next_label is None or match.start() < next_label):
+                next_label = match.start()
+    for pattern in (r"\bdate\s+of\s+birth\b\s*[:：]?", r"\b(?:id|nid)\s*(?:no|number)?\b\s*[:：]?"):
+        match = re.search(pattern, value, re.IGNORECASE)
+        if match and (next_label is None or match.start() < next_label):
+            next_label = match.start()
+    return value[:next_label] if next_label is not None else value
 
 
 def following_value(lines: list[str], start: int) -> str | None:
