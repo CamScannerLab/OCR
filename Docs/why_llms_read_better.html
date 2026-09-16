@@ -1,0 +1,536 @@
+<title>Why LLMs Beat Tesseract</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans+Bengali:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F2F4F1; --surface:#FBFCFA; --sunk:#E7EBE6; --ink:#16201B; --muted:#58665E; --rule:#CFD7D0;
+  --accent:#1D7349; --accent-soft:#D6EBDD;
+  --classic:#C8741F; --classic-soft:#F5E3CF;
+  --llm:#2F5FB3; --llm-soft:#DCE6F6;
+  --display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --bn:"Noto Sans Bengali","Kohinoor Bangla","Bangla MN",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1411; --surface:#151D19; --sunk:#1C2621; --ink:#E1E9E3; --muted:#93A399; --rule:#2C3831;
+    --accent:#62C792; --accent-soft:#1D3A2B;
+    --classic:#C4803C; --classic-soft:#3A2A18; --llm:#5F88D0; --llm-soft:#1B2A45;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1411; --surface:#151D19; --sunk:#1C2621; --ink:#E1E9E3; --muted:#93A399; --rule:#2C3831;
+  --accent:#62C792; --accent-soft:#1D3A2B;
+  --classic:#C4803C; --classic-soft:#3A2A18; --llm:#5F88D0; --llm-soft:#1B2A45;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.86em;background:var(--sunk);padding:.08em .35em;border-radius:3px}
+.mono{font-family:var(--mono);font-size:.9em}
+.bn{font-family:var(--bn)}
+
+.shell{max-width:1160px;margin:0 auto;padding:48px 28px 96px;display:grid;grid-template-columns:200px minmax(0,1fr);gap:56px}
+nav.toc{position:sticky;top:28px;align-self:start;font-size:13px}
+nav.toc p{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+nav.toc ol{list-style:none;margin:0 0 22px;padding:0;display:grid;gap:4px}
+nav.toc a{color:var(--muted);text-decoration:none;display:block;padding:2px 0}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--ink)}
+@media (max-width:960px){.shell{grid-template-columns:1fr;gap:0}nav.toc{display:none}}
+main{min-width:0}
+
+header.top{padding-bottom:34px;border-bottom:1px solid var(--rule)}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-family:var(--display);font-variation-settings:"wdth" 112;font-weight:780;font-size:clamp(34px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance}
+h1 .c{color:var(--classic)} h1 .l{color:var(--llm)}
+.lede{font-size:19px;line-height:1.55;max-width:62ch;margin:0}
+.keyline{display:flex;flex-wrap:wrap;gap:8px 20px;margin:20px 0 0;padding:0;list-style:none;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.sw.c{background:var(--classic)} .sw.l{background:var(--llm)}
+
+section{padding-top:56px}
+h2{font-family:var(--display);font-variation-settings:"wdth" 108;font-weight:740;font-size:30px;line-height:1.1;letter-spacing:-.01em;margin:0 0 14px;text-wrap:balance}
+h2 .part{display:block;font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;font-variation-settings:normal}
+h3{font-family:var(--display);font-variation-settings:"wdth" 104;font-weight:680;font-size:21px;line-height:1.2;margin:40px 0 10px;text-wrap:balance}
+p{max-width:68ch;margin:0 0 14px}
+.note{font-size:12.5px;color:var(--muted)}
+
+/* short answer */
+.answer{list-style:none;margin:26px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.answer li{background:var(--surface);padding:16px 18px}
+.answer b{display:block;font-family:var(--display);font-variation-settings:"wdth" 104;font-size:16.5px;font-weight:680;margin-bottom:4px;line-height:1.25}
+.answer span{font-size:14px;color:var(--muted);line-height:1.5;display:block}
+.answer a{font-family:var(--mono);font-size:11.5px;text-decoration:none;display:inline-block;margin-top:6px}
+
+figure{margin:26px 0 8px}
+.scroll{overflow-x:auto}
+figure svg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted);max-width:72ch;margin-top:10px;line-height:1.5}
+
+.dg text{fill:var(--ink);font-family:var(--body);font-size:13px}
+.dg text.sub{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.dg text.lab{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.dg text.grp{font-family:var(--mono);font-size:11px;letter-spacing:.08em;font-weight:500}
+.dg text.c{fill:var(--classic)} .dg text.l{fill:var(--llm)}
+.dg text.big{font-family:var(--display);font-size:22px;font-weight:700}
+.dg text.bn{font-family:var(--bn);font-size:14px}
+.dg .box{fill:var(--surface);stroke:var(--rule);stroke-width:1.2}
+.dg .box.c{fill:var(--classic-soft);stroke:var(--classic)}
+.dg .box.l{fill:var(--llm-soft);stroke:var(--llm);stroke-width:1.5}
+.dg .box.plain{fill:var(--sunk);stroke:var(--rule)}
+.dg .edge{fill:none;stroke:var(--muted);stroke-width:1.3}
+.dg .edge.c{stroke:var(--classic)} .dg .edge.l{stroke:var(--llm);stroke-width:1.6}
+.dg .loss{stroke:var(--classic);stroke-width:1.2;stroke-dasharray:3 3;fill:none}
+.dg .ah{fill:var(--muted)} .dg .ah.c{fill:var(--classic)} .dg .ah.l{fill:var(--llm)}
+.dg .fillc{fill:var(--classic)} .dg .filll{fill:var(--llm)}
+.dg .card{fill:var(--surface);stroke:var(--muted);stroke-width:1.2}
+.dg .ghost{fill:var(--rule)}
+.dg .seen-c{fill:var(--classic-soft);stroke:var(--classic);stroke-width:2}
+.dg .seen-l{fill:var(--llm-soft);stroke:var(--llm);stroke-width:2;fill-opacity:.55}
+.dg .dim{fill:var(--ground);opacity:.72}
+
+/* tables */
+.tablewrap{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:8px 12px 8px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+td:first-child{white-space:nowrap}
+th .sw{margin-right:5px}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* step lists */
+.steps{list-style:none;counter-reset:s;margin:18px 0;padding:0;border-top:1px solid var(--rule)}
+.steps li{counter-increment:s;display:grid;grid-template-columns:44px minmax(0,1fr) minmax(0,240px);gap:4px 18px;padding:13px 0;border-bottom:1px solid var(--rule)}
+.steps li::before{content:counter(s,decimal-leading-zero);font-family:var(--mono);font-size:13px;color:var(--llm);padding-top:2px}
+.steps.classic li::before{color:var(--classic)}
+.steps h4{margin:0 0 2px;font-size:15.5px;font-weight:600}
+.steps p{margin:0;font-size:14.5px}
+.steps .ref{font-family:var(--mono);font-size:11.5px;color:var(--muted);word-break:break-word;padding-top:3px}
+.steps li.inside{background:var(--llm-soft)}
+.steps li.inside{padding-left:0}
+@media (max-width:700px){.steps li{grid-template-columns:36px minmax(0,1fr)}.steps .ref{grid-column:2}}
+.tagline{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--llm);margin:0 0 2px}
+
+/* chart */
+.chart{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:18px 18px 12px;margin:26px 0 8px;position:relative}
+.chart h4{margin:0 0 2px;font-family:var(--display);font-variation-settings:"wdth" 104;font-size:17px;font-weight:680}
+.chart .sub{font-size:13px;color:var(--muted);margin:0 0 10px}
+.chart .legend{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin:0 0 6px}
+.chart svg{display:block;width:100%;min-width:640px;height:auto}
+.chart svg text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.chart svg text.name{font-family:var(--body);font-size:12.5px;fill:var(--ink)}
+.chart svg text.val{fill:var(--ink);font-variant-numeric:tabular-nums}
+.chart .grid{stroke:var(--rule);stroke-width:1}
+.chart .bar-c{fill:var(--classic)} .chart .bar-l{fill:var(--llm)}
+.chart .hit{fill:transparent;cursor:default}
+.chart .row:hover .bar-c,.chart .row:hover .bar-l,.chart .row:focus .bar-c,.chart .row:focus .bar-l{opacity:.8}
+.chart .row:focus{outline:none}
+.chart .row:focus .hit{stroke:var(--accent);stroke-width:1.5}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12.5px;line-height:1.4;padding:7px 10px;border-radius:5px;max-width:280px;z-index:2}
+.tip b{font-weight:600}
+details.tableview{margin-top:8px;font-size:13px}
+details.tableview summary{cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:11.5px}
+
+/* example compare */
+.versus{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}
+@media (max-width:760px){.versus{grid-template-columns:1fr}}
+.pane{background:var(--surface);border:1px solid var(--rule);border-top:3px solid var(--classic);border-radius:6px;padding:14px 16px}
+.pane.l{border-top-color:var(--llm)}
+.pane h5{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.trace{font-family:var(--mono);font-size:12.5px;display:grid;gap:6px}
+.trace div{display:grid;grid-template-columns:92px 1fr;gap:10px}
+.trace span:first-child{color:var(--muted)}
+.trace .bn{font-size:14px}
+.bad{color:var(--classic);font-weight:500}
+.good{color:var(--llm);font-weight:500}
+
+.callout{border:1px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:14px 18px;margin:22px 0;max-width:74ch}
+.callout p{margin:0;font-size:15px}
+.warnlist{margin:14px 0;padding-left:20px;max-width:70ch}
+.warnlist li{margin-bottom:8px}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Answer</p>
+  <ol><li><a href="#short">Short answer</a></li><li><a href="#pipelines">Two pipelines</a></li></ol>
+  <p>Steps</p>
+  <ol><li><a href="#llm-steps">LLM engines</a></li><li><a href="#classic-steps">Tesseract, EasyOCR, Paddle</a></li></ol>
+  <p>Why</p>
+  <ol>
+    <li><a href="#chain">Error chain</a></li>
+    <li><a href="#context">What the reader sees</a></li>
+    <li><a href="#fields">Text vs fields</a></li>
+    <li><a href="#size">Model size</a></li>
+    <li><a href="#handicaps">Our adapters</a></li>
+  </ol>
+  <p>Caution</p>
+  <ol><li><a href="#seems">Why "seems"</a></li><li><a href="#tradeoffs">Tradeoffs</a></li><li><a href="#local">Closing the gap</a></li></ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="kicker">nid_ocr_lab · engine comparison</p>
+  <h1>Why <span class="l">vision LLMs</span> read NID cards better than <span class="c">Tesseract</span></h1>
+  <p class="lede">In the dashboard, Gemini and LM Studio (Qwen2.5-VL) usually return cleaner NID fields than Tesseract, EasyOCR or PaddleOCR. The LLMs don't have sharper eyes. They are doing a different job: one model looks at the whole card and writes the answer, while the OCR engines pass the image through a chain of separate steps, and each step can lose something.</p>
+  <ul class="keyline">
+    <li><span class="sw l"></span>LLM engines: <code>gemini_vision</code>, <code>lmstudio_vision</code></li>
+    <li><span class="sw c"></span>OCR pipelines: <code>tesseract</code>, <code>easyocr</code>, <code>paddleocr</code></li>
+  </ul>
+</header>
+
+<section id="short">
+  <h2><span class="part">Short answer</span>Five reasons, most important first</h2>
+  <ul class="answer">
+    <li><b>One step instead of a chain</b><span>OCR engines binarize, detect, cut, read and parse. Each step multiplies the chance of an error. The LLM does all of it in a single model.</span><a href="#chain">→ error chain</a></li>
+    <li><b>It sees the whole card</b><span>Tesseract reads a thin strip, one line at a time. The LLM sees every line, the layout and the prompt together, so a blurred letter can be worked out from its surroundings.</span><a href="#context">→ what the reader sees</a></li>
+    <li><b>It answers the actual question</b><span>We ask the LLM for fields and it returns JSON. The OCR engines return plain text, and our regex parser has to find the fields in it. A misread label loses the field.</span><a href="#fields">→ text vs fields</a></li>
+    <li><b>It is roughly 550–7,000× bigger</b><span>Qwen2.5-VL on disk is 6.0 GB. Tesseract's Bengali model is 0.86 MB (fast) or 11 MB (best). That size holds knowledge of Bengali names, dates and ID cards.</span><a href="#size">→ model size</a></li>
+    <li><b>Our comparison is partly unfair</b><span>The PaddleOCR adapter always loads the English model, EasyOCR uses greedy decoding, and the parser is basic. The OCR engines start behind.</span><a href="#handicaps">→ our adapters</a></li>
+  </ul>
+</section>
+
+<section id="pipelines">
+  <h2><span class="part">The picture</span>Two very different pipelines</h2>
+  <p>Both paths start from the same image, the output of <code>prepare_ocr_input()</code> (crop, filter and preview rotation). After that they share nothing. The dashed orange marks show where the OCR pipeline can lose information that no later step can recover.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 400" role="img" aria-label="OCR pipeline has eight steps from card image through binarize, detect regions, cut lines, recognize each line, plain text, regex parser, to fields, with information loss at several steps. The LLM pipeline has four: card image plus prompt, vision encoder, language model attending to whole card, JSON fields.">
+      <defs>
+        <marker id="mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah c" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="ml" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah l" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <text class="grp c" x="17" y="28">OCR PIPELINE · TESSERACT / EASYOCR / PADDLEOCR</text>
+      <g>
+        <rect class="box plain" x="17" y="42" width="110" height="56" rx="5"/><text x="72" y="66" text-anchor="middle">Card image</text><text class="sub" x="72" y="84" text-anchor="middle">RGB pixels</text>
+        <rect class="box c" x="145" y="42" width="110" height="56" rx="5"/><text x="200" y="66" text-anchor="middle">Binarize</text><text class="sub" x="200" y="84" text-anchor="middle">ink vs paper</text>
+        <rect class="box c" x="273" y="42" width="110" height="56" rx="5"/><text x="328" y="66" text-anchor="middle">Find text</text><text class="sub" x="328" y="84" text-anchor="middle">layout / detector</text>
+        <rect class="box c" x="401" y="42" width="110" height="56" rx="5"/><text x="456" y="66" text-anchor="middle">Cut lines</text><text class="sub" x="456" y="84" text-anchor="middle">boxes</text>
+        <rect class="box c" x="529" y="42" width="110" height="56" rx="5"/><text x="584" y="66" text-anchor="middle">Read each line</text><text class="sub" x="584" y="84" text-anchor="middle">LSTM / CRNN</text>
+        <rect class="box c" x="657" y="42" width="110" height="56" rx="5"/><text x="712" y="66" text-anchor="middle">Plain text</text><text class="sub" x="712" y="84" text-anchor="middle">lines, no meaning</text>
+        <rect class="box c" x="785" y="42" width="110" height="56" rx="5"/><text x="840" y="66" text-anchor="middle">NIDParser</text><text class="sub" x="840" y="84" text-anchor="middle">regex + labels</text>
+        <rect class="box plain" x="913" y="42" width="110" height="56" rx="5"/><text x="968" y="66" text-anchor="middle">Fields</text><text class="sub" x="968" y="84" text-anchor="middle">name, DOB, NID</text>
+      </g>
+      <g>
+        <line class="edge c" x1="127" y1="70" x2="143" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="255" y1="70" x2="271" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="383" y1="70" x2="399" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="511" y1="70" x2="527" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="639" y1="70" x2="655" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="767" y1="70" x2="783" y2="70" marker-end="url(#mc)"/>
+        <line class="edge c" x1="895" y1="70" x2="911" y2="70" marker-end="url(#mc)"/>
+      </g>
+      <g>
+        <line class="loss" x1="200" y1="98" x2="200" y2="128"/><text class="lab c" x="200" y="142" text-anchor="middle">thin marks, glare</text>
+        <line class="loss" x1="328" y1="98" x2="328" y2="128"/><text class="lab c" x="328" y="142" text-anchor="middle">rows dropped</text>
+        <line class="loss" x1="456" y1="98" x2="456" y2="160"/><text class="lab c" x="456" y="174" text-anchor="middle">two rows merged</text>
+        <line class="loss" x1="584" y1="98" x2="584" y2="128"/><text class="lab c" x="584" y="142" text-anchor="middle">one line of context</text>
+        <line class="loss" x1="712" y1="98" x2="712" y2="160"/><text class="lab c" x="712" y="174" text-anchor="middle">layout forgotten</text>
+        <line class="loss" x1="840" y1="98" x2="840" y2="128"/><text class="lab c" x="840" y="142" text-anchor="middle">label misread → miss</text>
+      </g>
+
+      <text class="grp l" x="17" y="232">VISION LLM · GEMINI / LM STUDIO</text>
+      <g>
+        <rect class="box plain" x="17" y="246" width="110" height="56" rx="5"/><text x="72" y="270" text-anchor="middle">Card image</text><text class="sub" x="72" y="288" text-anchor="middle">same pixels</text>
+        <rect class="box plain" x="17" y="318" width="110" height="56" rx="5"/><text x="72" y="342" text-anchor="middle">Prompt</text><text class="sub" x="72" y="360" text-anchor="middle">10 keys + rules</text>
+        <rect class="box l" x="173" y="246" width="190" height="128" rx="5"/>
+        <text x="268" y="290" text-anchor="middle">Vision encoder</text>
+        <text class="sub" x="268" y="310" text-anchor="middle">image → patch tokens</text>
+        <text class="sub" x="268" y="326" text-anchor="middle">colour kept, no binary</text>
+        <rect class="box l" x="409" y="246" width="486" height="128" rx="5"/>
+        <text x="652" y="276" text-anchor="middle">Language model (transformer decoder)</text>
+        <text class="sub" x="652" y="300" text-anchor="middle">every output token attends to: all image patches</text>
+        <text class="sub" x="652" y="317" text-anchor="middle">+ the prompt + the JSON written so far</text>
+        <text class="sub" x="652" y="334" text-anchor="middle">+ what it learned: Bengali script, names, dates, NID cards</text>
+        <text class="sub" x="652" y="358" text-anchor="middle">writes {"name_bangla": "…", …} token by token · temperature 0</text>
+        <rect class="box plain" x="913" y="282" width="110" height="56" rx="5"/><text x="968" y="306" text-anchor="middle">Fields</text><text class="sub" x="968" y="324" text-anchor="middle">JSON, no parser</text>
+      </g>
+      <g>
+        <path class="edge l" d="M127 274 H150 V300 H171" marker-end="url(#ml)"/>
+        <path class="edge l" d="M127 346 H386 V330 H407" marker-end="url(#ml)"/>
+        <text class="lab l" x="270" y="392" text-anchor="middle">prompt goes straight to the decoder</text>
+        <line class="edge l" x1="363" y1="300" x2="407" y2="300" marker-end="url(#ml)"/>
+        <text class="lab l" x="385" y="292" text-anchor="middle">tokens</text>
+        <line class="edge l" x1="895" y1="310" x2="911" y2="310" marker-end="url(#ml)"/>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Top: eight steps built by different people for general documents, joined by us. Bottom: one trained model that turns pixels into the answer we asked for. The LLM still has to recognize characters, but it never has to commit to a binary image, a line box or a label match before it reads.</figcaption>
+  </figure>
+</section>
+
+<section id="llm-steps">
+  <h2><span class="part">Steps · LLM engines</span>What Gemini and LM Studio actually do</h2>
+  <p>Both adapters send the same prompt (<code>VISION_PROMPT</code> in <code>lmstudio_vision.py</code>) with one image in a single request. Steps 01–04 and 06–08 are our code. Step 05, shaded, happens inside the model: we can't watch it, so it describes how vision-language models work in general.</p>
+  <ol class="steps">
+    <li><div><h4>Prepare the input image</h4><p>Same crop, filter and preview rotation as every other engine.</p></div><div class="ref">server.py · prepare_ocr_input()</div></li>
+    <li><div><h4>Skip the orientation search</h4><p><code>rotation="auto"</code> becomes 0°. No OSD pass and no four-way retry. The model reads the card as given.</p></div><div class="ref">run_lmstudio_vision() · run_gemini_vision()</div></li>
+    <li><div><h4>Encode the image</h4><p>Raw file bytes → base64, sent as PNG or JPEG. The model gets the image at full colour, with no binarization.</p></div><div class="ref">_image_base64() · _image_data_url()</div></li>
+    <li><div><h4>Send one request: image + prompt</h4><p>The prompt names the 10 keys and the rules: keep Bangla in Bangla script, digits only for the NID, <code>null</code> when a field isn't visible, front or back side. Settings: temperature 0.<br>Gemini: <code>responseMimeType: application/json</code>, 4096 output tokens, retries on 429/5xx after 1 s and 2 s.<br>LM Studio: OpenAI-style chat API, 900 max tokens, <code>reasoning_effort: none</code> so thinking models don't spend the whole budget reasoning.</p></div><div class="ref">_generate_content() · _chat_completion()</div></li>
+    <li class="inside"><div><p class="tagline">Inside the model</p><h4>See, then write the answer</h4><p>(a) The image is cut into small patches, and a vision encoder turns each patch into a token. (b) Those image tokens and the prompt tokens form one sequence. (c) The decoder writes the JSON one token at a time. Each token can use every image patch, the whole prompt, and all the JSON written so far. So when it writes the English name, it can use the Bengali name above it, the card's layout, and what it knows about Bangladeshi names.</p></div><div class="ref">not visible to us · general VLM design</div></li>
+    <li><div><h4>Extract JSON from the reply</h4><p>Strip <code>```</code> fences and take the text from the first <code>{</code> to the last <code>}</code>. If the JSON was cut off, Gemini's adapter still recovers the complete <code>"key": "value"</code> pairs one at a time.</p></div><div class="ref">_parse_field_json() · _salvage_field_json()</div></li>
+    <li><div><h4>Normalize the fields</h4><p>Keep the 10 known keys, trim whitespace, and turn empty strings into <code>null</code>.</p></div><div class="ref">normalize_fields()</div></li>
+    <li><div><h4>Map to NIDData without the parser</h4><p>Every non-empty value gets <b>confidence 0.80</b> and <code>needs_review=True</code>. No regex, no label matching, no word boxes.</p></div><div class="ref">nid_data_from_vision_fields()</div></li>
+  </ol>
+</section>
+
+<section id="classic-steps">
+  <h2><span class="part">Steps · OCR engines</span>What Tesseract, EasyOCR and PaddleOCR do</h2>
+  <p>All three produce <b>text with boxes</b>, not fields, and all three hand that text to <code>NIDParser</code>. They differ in how they find and read the text.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Step</th><th><span class="sw c"></span>Tesseract</th><th><span class="sw c"></span>EasyOCR</th><th><span class="sw c"></span>PaddleOCR</th></tr></thead>
+    <tbody>
+      <tr><td>1 · Orientation</td><td>OSD pass (<code>--psm 0</code>). If confidence &lt; 2.0, run OCR at 0/90/180/270 and keep the highest word-confidence sum.</td><td>At 0°. On <code>auto</code>, each detected box is also tried at 90/180/270.</td><td>Full OCR at 0/90/180/270 and keep the best heuristic score. Up to 4 full runs.</td></tr>
+      <tr><td>2 · Binarize</td><td>Global Otsu inside Tesseract. The binary drives layout.</td><td>None: the detector reads colour.</td><td>None: the detector reads colour.</td></tr>
+      <tr><td>3 · Find text</td><td>Rule-based layout: blobs → blocks → paragraphs → lines → words.</td><td>CRAFT neural detector: a heatmap of character regions, grouped into word boxes.</td><td>DB neural detector: text polygons.</td></tr>
+      <tr><td>4 · Read</td><td>LSTM per line on the original image, CTC beam search + word dictionary. <code>ben+eng</code>.</td><td>CRNN per box, <code>bengali_g1</code> / <code>english_g2</code>, <b>greedy</b> decoder.</td><td>PP-OCR recognizer, language <b>forced to <code>en</code></b>.</td></tr>
+      <tr><td>5 · Output</td><td>TSV rows → words grouped into lines, with confidence.</td><td>Box + text + score per region, <code>paragraph=False</code>.</td><td>Box + text + score per region.</td></tr>
+      <tr><td>6 · Fields</td><td><code>NIDParser</code>. Optional <code>fields</code> strategy: re-read each row with PSM 7 → 13.</td><td><code>NIDParser</code></td><td><code>NIDParser</code></td></tr>
+      <tr><td>Model on disk</td><td class="mono">ben 0.86 MB fast / 11 MB best<br>eng 4.1 MB / 15 MB</td><td class="mono">CRAFT 83 MB<br>bengali 215 MB · english 15 MB</td><td class="mono">not downloaded in this workspace</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Then <code>NIDParser</code> does the last step for all three:</p>
+  <ol class="steps classic">
+    <li><div><h4>NID number</h4><p>Look for <code>ID/NID NO</code> followed by ≥ 8 digits. Otherwise take any run of 10, 13 or 17 digits. Bengali digits are converted to 0–9.</p></div><div class="ref">find_nid_number()</div></li>
+    <li><div><h4>Date of birth</h4><p>Prefer a line containing <code>birth</code> or <span class="bn">জন্ম</span>. Try "01 Jan 1990", then ISO, then D/M/Y. The date must be a real calendar date.</p></div><div class="ref">find_date_of_birth()</div></li>
+    <li><div><h4>Labeled names and addresses</h4><p>Find the label (<span class="bn">নাম</span>, Name, <span class="bn">পিতা</span>, <span class="bn">মাতা</span>, <span class="bn">ঠিকানা</span>…) at the start of a line or before a colon. The value is the rest of that line, or the next line. At least 60% of its letters must be in the expected script. Fixed confidence 0.55.</p></div><div class="ref">find_labeled_value()</div></li>
+  </ol>
+</section>
+
+<section id="chain">
+  <h2><span class="part">Why · 1</span>Errors multiply along a chain</h2>
+  <p>If a field has to survive five separate steps, it arrives only if every step gets it right. Suppose each step is right 95% of the time. After five steps, only 77% of fields survive. The LLM still makes mistakes, but it has fewer separate places to make them.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 280" role="img" aria-label="Illustrative: five chained steps at 95 percent each leave 95, 90.3, 85.7, 81.5 and 77.4 percent of fields intact.">
+      <text class="lab" x="0" y="16">Illustrative arithmetic, not a measurement: 0.95 per step</text>
+      <g>
+        <text x="0" y="52">Binarize</text><rect class="fillc" x="190" y="38" width="807.5" height="20" rx="3"/><text class="lab" x="1002" y="52">95.0%</text>
+        <text x="0" y="90">Find text</text><rect class="fillc" x="190" y="76" width="767.1" height="20" rx="3"/><text class="lab" x="962" y="90">90.3%</text>
+        <text x="0" y="128">Cut lines</text><rect class="fillc" x="190" y="114" width="728.8" height="20" rx="3"/><text class="lab" x="924" y="128">85.7%</text>
+        <text x="0" y="166">Read line</text><rect class="fillc" x="190" y="152" width="692.3" height="20" rx="3"/><text class="lab" x="887" y="166">81.5%</text>
+        <text x="0" y="204">Parse label</text><rect class="fillc" x="190" y="190" width="657.7" height="20" rx="3"/><text class="lab" x="853" y="204">77.4%</text>
+        <text x="0" y="252">Vision LLM, one step</text><rect class="filll" x="190" y="238" width="807.5" height="20" rx="3"/><text class="lab" x="1002" y="252">95.0%</text>
+        <line x1="190" y1="30" x2="190" y2="264" stroke="currentColor" style="stroke:var(--rule)"/>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Bar length = share of fields still correct after that step (full width = 100%). Real step accuracies aren't equal and aren't measured yet. The point is the shape: a chain can only lose fields, and no step can win back what an earlier one dropped.</figcaption>
+  </figure>
+</section>
+
+<section id="context">
+  <h2><span class="part">Why · 2</span>What each reader sees when it reads one word</h2>
+  <p>Tesseract's LSTM reads the name <span class="bn">রহিম</span> from one line crop, scaled to a fixed height. Its bidirectional memory covers that line and nothing else. The LLM reads the same word with the whole card in view, plus the prompt, so it knows this is a Bangladeshi NID and this row is a name.</p>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 330" role="img" aria-label="Left: Tesseract sees only one thin line strip of the card. Right: the LLM sees the whole card and also has the prompt and prior knowledge.">
+      <!-- left card -->
+      <text class="grp c" x="20" y="22">TESSERACT LSTM · READS ONE LINE CROP</text>
+      <rect class="card" x="20" y="38" width="440" height="240" rx="12"/>
+      <g class="ghost-lines">
+        <rect class="ghost" x="44" y="58" width="200" height="12" rx="2"/>
+        <rect class="ghost" x="344" y="62" width="92" height="104" rx="4"/>
+        <rect class="ghost" x="44" y="136" width="170" height="10" rx="2"/>
+        <rect class="ghost" x="44" y="166" width="150" height="10" rx="2"/>
+        <rect class="ghost" x="44" y="192" width="160" height="10" rx="2"/>
+        <rect class="ghost" x="44" y="218" width="190" height="10" rx="2"/>
+        <rect class="ghost" x="44" y="244" width="170" height="10" rx="2"/>
+      </g>
+      <rect class="dim" x="20" y="38" width="440" height="240" rx="12"/>
+      <rect class="seen-c" x="36" y="96" width="290" height="30" rx="3"/>
+      <text class="bn" x="48" y="117">নাম: মোঃ রহিম উদ্দিন</text>
+      <text class="lab c" x="20" y="300">sees ≈ 1 line · scaled to a fixed height · no idea which field this is</text>
+
+      <!-- right card -->
+      <text class="grp l" x="560" y="22">VISION LLM · SEES THE WHOLE CARD</text>
+      <rect class="card" x="560" y="38" width="440" height="240" rx="12"/>
+      <rect class="seen-l" x="560" y="38" width="440" height="240" rx="12"/>
+      <rect class="ghost" x="584" y="58" width="200" height="12" rx="2"/>
+      <rect class="ghost" x="884" y="62" width="92" height="104" rx="4"/>
+      <text class="bn" x="588" y="117">নাম: মোঃ রহিম উদ্দিন</text>
+      <text x="588" y="147" style="font-size:12px">Name: MD. RAHIM UDDIN</text>
+      <text class="bn" x="588" y="175" style="font-size:12.5px">পিতা: আব্দুল করিম</text>
+      <text class="bn" x="588" y="201" style="font-size:12.5px">মাতা: রহিমা খাতুন</text>
+      <text x="588" y="227" style="font-size:12px">Date of Birth 01 Jan 1990</text>
+      <text x="588" y="253" style="font-size:12px">ID NO: 123 456 7890</text>
+      <text class="lab l" x="560" y="300">sees every row + photo + layout · plus the prompt · plus prior knowledge</text>
+      <text class="lab l" x="560" y="318">e.g. Bengali name above ↔ English name below spell the same person</text>
+    </svg>
+    </div>
+    <figcaption>A made-up card for illustration. On the left, if <span class="bn">র</span> is smudged, the LSTM has only its neighbours within that line to help. On the right, the model can check it against "RAHIM" two rows down.</figcaption>
+  </figure>
+</section>
+
+<section id="fields">
+  <h2><span class="part">Why · 3</span>OCR returns text, but we need fields</h2>
+  <p>A perfect OCR read can still produce a missing field. The parser finds values by their labels, so the label has to be read correctly too. The LLM is asked for the field directly and never has to spell the label.</p>
+  <div class="versus">
+    <div class="pane"><h5><span class="sw c"></span>Tesseract → NIDParser</h5>
+      <div class="trace">
+        <div><span>card row</span><span class="bn">নাম: মোঃ রহিম উদ্দিন</span></div>
+        <div><span>OCR line</span><span><span class="bn">লাম: মোঃ রহিম উদ্দিন</span> <span class="bad">← ন read as ল</span></span></div>
+        <div><span>parser</span><span>looks for label <span class="bn">নাম</span> → no match</span></div>
+        <div><span>name_bangla</span><span class="bad">null</span></div>
+      </div>
+      <p class="note" style="margin-top:10px">The name itself was read correctly. The field was lost because one letter of the label was misread. (The <code>fields</code> strategy knows <span class="bn">লাম</span> as an alias, but the base parser doesn't.)</p>
+    </div>
+    <div class="pane l"><h5><span class="sw l"></span>Vision LLM</h5>
+      <div class="trace">
+        <div><span>card row</span><span class="bn">নাম: মোঃ রহিম উদ্দিন</span></div>
+        <div><span>asked for</span><span>"name_bangla"</span></div>
+        <div><span>reasoning</span><span>first Bengali row after the header = holder's name</span></div>
+        <div><span>name_bangla</span><span class="good bn">মোঃ রহিম উদ্দিন</span></div>
+      </div>
+      <p class="note" style="margin-top:10px">It knows where a name sits on an NID card, so the label is just a hint.</p>
+    </div>
+  </div>
+  <p>The same gap shows up elsewhere. A line box that merges two rows gives the parser one line with two labels. A value that wraps to the next line only works if that line has no digit and doesn't start with a label word. A date printed in an unexpected format fails the regex. The LLM handles all of these because the prompt tells it what each field means.</p>
+</section>
+
+<section id="size">
+  <h2><span class="part">Why · 4</span>How big each model is</h2>
+  <p>File size on disk is a rough measure of how much a model can store. The difference here is huge, so the chart uses a log scale: each gridline is 10× the one before.</p>
+
+  <div class="chart" id="sizeChart">
+    <h4>Model files on disk in this workspace</h4>
+    <p class="sub">Megabytes, log scale. Measured with <code>ls -l</code> on 2026-09-16.</p>
+    <div class="legend"><span><span class="sw c"></span>OCR engine models</span><span><span class="sw l"></span>Vision LLM</span></div>
+    <div class="scroll"><svg id="sizeSvg" role="img" aria-label="Log-scale bar chart of model sizes: Tesseract Bengali fast 0.86 MB up to Qwen2.5-VL 6,037 MB"></svg></div>
+    <details class="tableview"><summary>Table view</summary>
+      <div class="tablewrap"><table><thead><tr><th>Model</th><th>File(s)</th><th class="num">MB</th></tr></thead><tbody id="sizeTable"></tbody></table></div>
+    </details>
+  </div>
+  <p class="note">Gemini 3.6 Flash isn't on the chart: it runs in Google's cloud and its size isn't published. The Qwen size is the 4-bit Q4_K_M weights (4,683 MB) plus the f16 vision projector (1,354 MB).</p>
+  <p>Size is not skill, but it sets a ceiling. An 0.86 MB LSTM can store Bengali letter shapes. A 6 GB model trained on huge amounts of web images and text can also store which names are common, how dates are written, and what an ID card looks like. That extra knowledge is what fills gaps when pixels are unclear. It is also what makes <b>hallucination</b> possible (see <a href="#seems">below</a>).</p>
+</section>
+
+<section id="handicaps">
+  <h2><span class="part">Why · 5</span>Our adapters make the OCR engines look worse</h2>
+  <p>Some of the gap comes from our own code, not the engines. Fix these before judging:</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Where</th><th>What happens</th><th>Effect on the comparison</th></tr></thead>
+    <tbody>
+      <tr><td><code>paddle_language_for()</code></td><td>Always returns <code>"en"</code>, even for <code>ben</code>.</td><td>PaddleOCR can't read a single Bengali field. Every Bengali name counts as a loss.</td></tr>
+      <tr><td><code>PaddleOCREngine.recognize()</code></td><td>Builds a new <code>PaddleOCR</code> object on every call. Auto rotation calls it 4 times.</td><td>Latency looks worse than the engine really is.</td></tr>
+      <tr><td><code>EasyOCREngine</code></td><td><code>decoder="greedy"</code>: takes the single best character at each step.</td><td>Beam search usually fixes some near-miss characters. It hasn't been tried yet.</td></tr>
+      <tr><td><code>NIDParser</code></td><td>Exact label match, fixed confidences (0.55–0.90), first match wins.</td><td>A correct OCR read can still end up in a missing or wrong field.</td></tr>
+      <tr><td>Tesseract default</td><td><code>strategy="single"</code>, one <code>psm 6</code> pass over the whole card with <code>ben+eng</code> mixed.</td><td>Mixed-script lines are harder. The <code>fields</code> strategy (one script per row) is fairer, but it isn't the default.</td></tr>
+      <tr><td>Rotation</td><td>LLMs are sent at 0°. OCR engines run an orientation search.</td><td>On upright cards the OCR engines do extra work, and extra chances to pick the wrong rotation, that the LLMs skip.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="seems">
+  <h2><span class="part">Caution</span>Why "seems" is the right word</h2>
+  <div class="callout"><p><b>No labeled benchmark has been run yet.</b> <code>benchmark/reports/</code> is empty and <code>benchmark/datasets/</code> has no annotated cards. "The LLM is better" is an impression from the dashboard, not a measured result.</p></div>
+  <p>Several things make an LLM answer <i>look</i> better than it is:</p>
+  <ul class="warnlist">
+    <li><b>Wrong answers look fluent.</b> When the LLM can't read a character, it writes a plausible one: a common spelling of a name, or a digit that fits the pattern. Tesseract's mistakes look like garbage (<code>রহি।ম</code>), so they are easy to spot. The LLM's look correct.</li>
+    <li><b>The confidence is made up.</b> Every non-empty LLM field gets 0.80, whether it's right or not. There is no per-character probability to check against.</li>
+    <li><b>No boxes, so no audit.</b> The output has no coordinates, so you can't overlay the answer on the image to check where each value came from.</li>
+    <li><b>The prompt allows rewriting.</b> "Return only digits" and "keep values concise" invite normalization. A field can come back reformatted rather than as printed, which is fine to read but fails an exact-match check.</li>
+    <li><b>Easy cards dominate the impression.</b> On a clean card every engine does well. The ranking that matters is on glare, blur and small print, measured per field.</li>
+  </ul>
+  <p>Treat LLM output as a strong second opinion, never as ground truth. <code>Docs/tesseract_accuracy_speed_cost_plan.md</code> sets the same rule for labeling.</p>
+</section>
+
+<section id="tradeoffs">
+  <h2><span class="part">Caution</span>What the better reading costs</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th></th><th><span class="sw c"></span>Tesseract (local)</th><th><span class="sw l"></span>LM Studio · Qwen2.5-VL 7B</th><th><span class="sw l"></span>Gemini 3.6 Flash</th></tr></thead>
+    <tbody>
+      <tr><td>Cost per card</td><td>CPU only, no fee</td><td>No fee, but needs a machine that can hold 6 GB of weights plus memory to run them</td><td>Per-call API fee, a variable cost per card</td></tr>
+      <tr><td>Accuracy</td><td>Lower on Bengali today, and not yet measured</td><td>Looks higher, not measured, can hallucinate</td><td>Looks highest, not measured, can hallucinate</td></tr>
+      <tr><td>Latency</td><td>Measured: ~10 ms per row re-read via the C API (vs ~89 ms via the CLI), from <code>tesseract_reader.py</code>. Full card not benchmarked.</td><td>Not benchmarked. Generates up to 900 tokens on local hardware.</td><td>Not benchmarked. Network round trip, 180 s timeout, retries on 429/5xx.</td></tr>
+      <tr><td>Privacy</td><td>Card never leaves the machine</td><td>Stays local (unless the endpoint is remote)</td><td><b>The NID image is uploaded to Google</b></td></tr>
+      <tr><td>Checkable output</td><td>Boxes + per-word confidence</td><td>JSON only</td><td>JSON only</td></tr>
+      <tr><td>Role in this project</td><td><b>Production path</b></td><td>Comparison only</td><td>Comparison only</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="local">
+  <h2><span class="part">Next</span>Bringing the LLM's advantages into the local pipeline</h2>
+  <p>Each reason above suggests a local fix. None of them needs an LLM at run time.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>LLM advantage</th><th>Local equivalent</th><th>Status in repo</th></tr></thead>
+    <tbody>
+      <tr><td>One step, no chain</td><td>Skip generic layout: locate NID rows from the known card template, then read each row directly.</td><td>Partly: <code>locate_rows()</code> in <code>tesseract_fields.py</code></td></tr>
+      <tr><td>Whole-card context</td><td>Cross-check fields: Bengali ↔ English name, NID length 10/13/17, valid DOB, script share ≥ 0.6.</td><td>Validators exist in the parser, but there's no cross-field check</td></tr>
+      <tr><td>Answers fields, not text</td><td>Read one script per row with PSM 7 and a digit whitelist for the ID. Label aliases for common misreads.</td><td>Done in the <code>fields</code> strategy, which isn't the default</td></tr>
+      <tr><td>Knowledge of Bengali names</td><td>Fine-tune the <code>ben</code> LSTM on corrected NID line crops. Use a name lexicon only to rank candidates, never to replace what's printed.</td><td>Training pipeline exists: <code>training/</code>, <code>draft-lines</code></td></tr>
+      <tr><td>No binarization loss</td><td>Keep the LSTM reading grey, and use <code>nid_ink_v2_contrast</code> so layout sees clean ink.</td><td>Done (see <a href="nid_ocr_walkthrough.html">NID OCR Walkthrough</a>)</td></tr>
+      <tr><td>A fair race</td><td>Fix Paddle's language, try EasyOCR beam search, and run a labeled per-field benchmark with the LLMs as challengers.</td><td>Planned in <code>tesseract_accuracy_speed_cost_plan.md</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Sources: <code>engines/gemini_vision.py</code>, <code>engines/lmstudio_vision.py</code>, <code>engines/tesseract.py</code>, <code>engines/easyocr.py</code>, <code>engines/paddleocr.py</code>, <code>parsers/nid_parser.py</code>, <code>dashboard/server.py</code>. File sizes from this machine.</p>
+</section>
+</main>
+</div>
+
+<script>
+(() => {
+  const data = [
+    { name: "Tesseract ben · fast", file: "tessdata/ben.traineddata (system)", mb: 0.856, k: "c" },
+    { name: "Tesseract eng · fast", file: "tessdata/eng.traineddata (system)", mb: 4.113, k: "c" },
+    { name: "Tesseract ben · best", file: "tessdata/best/ben.traineddata", mb: 11.045, k: "c" },
+    { name: "EasyOCR english_g2", file: "easyocr/models/english_g2.pth", mb: 15.144, k: "c" },
+    { name: "Tesseract eng · best", file: "tessdata/best/eng.traineddata", mb: 15.401, k: "c" },
+    { name: "EasyOCR CRAFT detector", file: "easyocr/models/craft_mlt_25k.pth", mb: 83.152, k: "c" },
+    { name: "EasyOCR bengali", file: "easyocr/models/bengali.pth", mb: 215.370, k: "c" },
+    { name: "Qwen2.5-VL 7B (LM Studio)", file: "Q4_K_M.gguf + mmproj-f16.gguf", mb: 6037.235, k: "l" },
+  ];
+  const W = 900, rowH = 34, top = 14, left = 210, right = 90, bottom = 28;
+  const H = top + data.length * rowH + bottom;
+  const lo = Math.log10(0.5), hi = Math.log10(10000);
+  const x = v => left + (Math.log10(v) - lo) / (hi - lo) * (W - left - right);
+  const svg = document.getElementById("sizeSvg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const fmt = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  let s = "";
+  [1, 10, 100, 1000, 10000].forEach(t => {
+    const gx = x(t);
+    s += `<line class="grid" x1="${gx}" x2="${gx}" y1="${top - 4}" y2="${H - bottom}"/><text x="${gx}" y="${H - 8}" text-anchor="middle">${t.toLocaleString("en-US")}${t === 10000 ? " MB" : ""}</text>`;
+  });
+  data.forEach((d, i) => {
+    const y = top + i * rowH, bw = x(d.mb) - left;
+    s += `<g class="row" tabindex="0" data-i="${i}" aria-label="${d.name}: ${fmt(d.mb)} MB">
+      <rect class="hit" x="0" y="${y}" width="${W}" height="${rowH}"/>
+      <text class="name" x="${left - 12}" y="${y + rowH / 2 + 4}" text-anchor="end">${d.name}</text>
+      <path class="bar-${d.k}" d="M${left} ${y + 8} H${left + bw - 4} Q${left + bw} ${y + 8} ${left + bw} ${y + 12} V${y + rowH - 12} Q${left + bw} ${y + rowH - 8} ${left + bw - 4} ${y + rowH - 8} H${left} Z"/>
+      <text class="val" x="${left + bw + 8}" y="${y + rowH / 2 + 4}">${fmt(d.mb)} MB</text>
+    </g>`;
+  });
+  svg.innerHTML = s;
+  document.getElementById("sizeTable").innerHTML = data.map(d => `<tr><td>${d.name}</td><td class="mono">${d.file}</td><td class="num">${fmt(d.mb)}</td></tr>`).join("");
+
+  const chart = document.getElementById("sizeChart");
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; chart.append(tip);
+  const base = data[0].mb;
+  const show = (g, cx, cy) => {
+    const d = data[+g.dataset.i];
+    tip.innerHTML = `<b>${d.name}</b><br>${fmt(d.mb)} MB · ${d.file}<br>${d.mb / base >= 2 ? Math.round(d.mb / base).toLocaleString("en-US") + "× Tesseract ben fast" : "smallest model"}`;
+    tip.hidden = false;
+    const r = chart.getBoundingClientRect();
+    const tx = Math.min(cx - r.left + 14, r.width - tip.offsetWidth - 8);
+    tip.style.left = Math.max(8, tx) + "px"; tip.style.top = (cy - r.top + 14) + "px";
+  };
+  svg.querySelectorAll(".row").forEach(g => {
+    g.addEventListener("mousemove", e => show(g, e.clientX, e.clientY));
+    g.addEventListener("mouseleave", () => tip.hidden = true);
+    g.addEventListener("focus", () => { const b = g.getBoundingClientRect(); show(g, b.left + b.width / 2, b.top + b.height / 2); });
+    g.addEventListener("blur", () => tip.hidden = true);
+  });
+})();
+</script>
