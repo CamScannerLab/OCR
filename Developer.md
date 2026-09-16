@@ -18,6 +18,7 @@ Implemented in this repo:
 - Dashboard OCR controls.
 - Dashboard upload of any image or PDF, OCR'd as uploaded or through the filter preview.
 - Tesseract adapter with explicit model folder (fast/best/custom), OEM, PSM, DPI and line-level output.
+- Tesseract step inspector in the dashboard: threshold value/map and binary, blobs, blocks, lines, words, per-line LSTM input and choices, with adjustable thresholding.
 - Line labeling in the dashboard, producing tesstrain ground truth (`.png` + `.gt.txt`).
 - Card-level train/eval split, tesstrain fine-tuning wrapper, and line CER evaluation CLI.
 - PaddleOCR and EasyOCR adapters; Gemini/LM Studio vision baselines (test only).
@@ -212,9 +213,11 @@ selected image -> as uploaded | SDK crop + filter -> PNG
 
 `fields` strategy (`refine_nid_fields`):
 
-1. Find row labels in the page pass words, in card order: নাম, Name, পিতা, মাতা, Date of Birth, ID NO (common misreads such as `লাম`/`Neme` included).
+1. Find row labels in the page pass words, in card order: নাম, Name, পিতা, মাতা, Date of Birth, ID NO (common misreads such as `লাম`/`Neme` included). Both NID layouts are handled: `label: value` on one line, and the layout that prints the label on its own line with the value underneath (the next line is then the value region, unless it is another row's label).
 2. A row missing between two found rows gets a box interpolated from its neighbours. This restores rows the page pass dropped; a row above the first or below the last found label cannot be restored.
 3. Crop each value (right of the label; vertical padding capped by row spacing), upscale to 64 px, and OCR it with one language: `ben` for Bengali rows, `eng` for Name/DOB, `eng` + digit whitelist for the ID. PSM 7 with a 12 px border first; PSM 13 without a border only if that read scores below 0.75.
+Row re-reads go through `engines/tesseract_reader.py`. It calls the Tesseract C API on a handle cached per (model folder, language) for the life of the process, instead of starting a `tesseract` process per row: measured on a 336 px card, the re-read phase dropped from 465 ms to 96 ms for the same 7 calls and byte-identical output (the CLI spends ~54 ms per call on process startup). The handles are shared, so per-call variables such as the digit whitelist are reset after every read, and each handle is used under its own lock because the dashboard server is threaded. `ocr.metadata.field_reader` records which reader ran (`capi`, or `cli` when the library cannot be loaded).
+
 4. Candidates (page value and re-reads) score `confidence × share of letters in the row's script`, and the highest wins. Name rows drop digit/symbol-only tokens. `ocr.metadata.fields` records every candidate, the chosen source (`page` / `reread` / `interpolated` / `missing`) and the crop box; blocks hold the value crops, so restored rows can be labelled for training.
 
 Typical cost is 6–12 extra calls on small crops (~0.5–1 s with `best`). Best results so far: `NID ink` + `fields` + `best` read all six fields on both a 1780 px and a 336 px card.
@@ -227,6 +230,31 @@ The run summary shows model versions, OCR call count, DPI source, orientation de
 
 - Default model: `qwen2.5-vl-7b-instruct` when LM Studio has it loaded; override with `LM_STUDIO_VISION_MODEL` or the Model select. Embedding models are hidden from the list.
 - Requests send `reasoning_effort: "none"` (`LM_STUDIO_REASONING_EFFORT`, set `default` to omit it). Thinking models such as `qwen/qwen3.5-9b` otherwise spend the whole `max_tokens` budget (`LM_STUDIO_MAX_TOKENS`, default 900) reasoning, return empty content, and the dashboard showed "LM Studio did not return JSON fields". `/no_think` and `chat_template_kwargs.enable_thinking=false` did not disable thinking in LM Studio; `reasoning_effort` did.
+
+## Inspect Tesseract Step By Step
+
+The **Tesseract steps** card (under the OCR card) runs one image through Tesseract and shows every intermediate result. It uses the same Source, OCR input, Filter, Rotation, Language, Model and PSM as the OCR card.
+
+| Step | Shown |
+|---|---|
+| Input | Exact image handed to Tesseract, size, DPI and its source |
+| Orientation | OSD result when Rotation = auto (kept at 0° if confidence < 2) |
+| Greyscale | `pixConvertTo8` image and a 256-bin histogram |
+| Threshold | Method and parameters, the threshold value (Otsu per colour channel, or min/median/max of the adaptive/Sauvola threshold map with a heat map), Tesseract's binary image, ink share, and a pixel-by-pixel check of the recomputed binary against Tesseract's |
+| Blobs, blocks, paragraphs, lines, words/symbols | Counts and sizes, plus a **Layout viewer** that draws each level (and line baselines) over the binary or input image; hover a box for its id, size, text and confidence |
+| Tesseract's page segmentation images | `tessedit_dump_pageseg_images` output (PageSegInput, NoLines, NoImages) and log with the estimated resolution. Only PSM 1/2/3/4/11/12 produce them |
+| LSTM line recognition | Per line: the crop the recognizer reads (from the original image), its binary crop, text, confidence; per word the winning language (ben/eng) and dictionary flag; per symbol alternatives (hover). Lines much taller than the median are flagged `tall` (merged rows) |
+| Page output | Text and parsed NID fields from the one whole-page run — a row the layout step dropped is missing here |
+| NID fields re-read | The fields strategy applied to this page result: per row, the crop it re-read, what the page pass gave, the chosen value and where it came from. Untick **NID fields re-read** to skip it |
+
+Threshold controls: **Otsu** (Tesseract default), **Adaptive Otsu** (tile size, smoothing, score fraction; sizes × DPI), **Sauvola** (window × DPI, k), or **Manual value** (0–255 slider). Changing any of them re-runs automatically. **Layout only** skips recognition (~0.1 s) for fast threshold tuning.
+
+How it works:
+
+- `engines/tesseract_capi.py` calls the installed libtesseract/libleptonica C API with ctypes (no new dependency). The CLI only returns final text; the C API exposes the binary image, components, layout iterators, line crops and symbol choices. For the same settings its text equals the CLI's (tested).
+- Tesseract does not return threshold values, so `engines/tesseract_steps.py` recomputes them with Tesseract 5.5's own code paths (`otsuthr.cpp`, `thresholder.cpp`: per-channel Otsu with its ink-side rule; `pixOtsuAdaptiveThreshold`/`pixSauvolaBinarizeTiled` with tile/window = setting × resolution, where resolution is the image DPI if 70–2400, `--dpi` if given, else 70). The dashboard shows `matches Tesseract ✓` only when the recomputed binary equals Tesseract's; otherwise it shows the match percentage and a difference image.
+- With Otsu/Adaptive/Sauvola the binary only drives layout: the line recognizer reads the original image (`Tesseract::BestPix`). Feeding Tesseract a binary image gives the same layout but different text. **Manual value** binarizes before Tesseract, so the recognizer then reads the binary too.
+- Results are written to gitignored `benchmark/generated/steps/<id>/` (newest 20 kept) and served from `GET /api/steps/<id>/<file>.png`; the run itself is `POST /api/tesseract/steps`.
 
 ## Label Lines For Tesseract Training
 
@@ -353,14 +381,17 @@ benchmark/
   datasets/ ocr_outputs/ reports/
   uploads/                   dashboard uploads (gitignored)
   training/ground-truth/     labeled line pairs per dataset (gitignored)
-  generated/                 tessdata variants, OCR runs, EasyOCR models (gitignored)
+  training/drafts/           draft line pairs waiting for review (gitignored)
+  generated/                 tessdata variants, OCR runs, step inspector runs, EasyOCR models (gitignored)
 training/tesstrain/          tesstrain checkout (gitignored)
 nid_ocr_lab/
   cli.py models.py pipeline.py evaluation.py
-  engines/     base.py tesseract.py tessdata.py easyocr.py paddleocr.py gemini_vision.py lmstudio_vision.py
+  engines/     base.py tesseract.py tessdata.py tesseract_fields.py tesseract_capi.py tesseract_steps.py
+               tesseract_reader.py
+               easyocr.py paddleocr.py gemini_vision.py lmstudio_vision.py
   parsers/     nid_parser.py
   dashboard/   server.py uploads.py filters.py indexer.py static/
-  training/    dataset.py tesstrain_runner.py
+  training/    dataset.py drafts.py tesstrain_runner.py
 tests/         unittest suite
 ```
 
@@ -371,11 +402,17 @@ tests/         unittest suite
 - `nid_ocr_lab/dashboard/indexer.py`: discovers SmartScan samples and dataset health.
 - `nid_ocr_lab/dashboard/filters.py`: image filters, SDK-style crop, mask overlay rendering; lossless OCR inputs.
 - `nid_ocr_lab/dashboard/static/app.js`: dashboard state, uploads, OCR controls, line labeling.
+- `nid_ocr_lab/dashboard/static/steps.js`: Tesseract steps card (threshold controls, step timeline, layout viewer).
 - `nid_ocr_lab/engines/tesseract.py`: Tesseract adapter (explicit command, line reconstruction, OSD).
+- `nid_ocr_lab/engines/tesseract_capi.py`: ctypes binding to libtesseract/libleptonica for intermediate results.
+- `nid_ocr_lab/engines/tesseract_steps.py`: step inspector; recomputed threshold values checked against Tesseract's binary.
+- `nid_ocr_lab/engines/tesseract_fields.py`: NID fields strategy (per-row, script-locked re-read).
+- `nid_ocr_lab/engines/tesseract_reader.py`: line reader with cached C API handles (CLI fallback).
 - `nid_ocr_lab/engines/tessdata.py`: model folder registry, sha256 and embedded version lookup.
 - `nid_ocr_lab/parsers/nid_parser.py`: script-aware label parser, NID number, validated DOB.
 - `nid_ocr_lab/evaluation.py`: field metrics over annotated fields, per-script accuracy, CER.
 - `nid_ocr_lab/training/dataset.py`: OCR run artifacts, line crops, ground-truth writing, card-level split.
+- `nid_ocr_lab/training/drafts.py`: `draft-lines` / `promote-drafts` batch labelling.
 - `nid_ocr_lab/training/tesstrain_runner.py`: tesstrain wrapper and line-level model comparison.
 - `nid_ocr_lab/cli.py`: command-line entry point.
 

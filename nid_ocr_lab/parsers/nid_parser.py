@@ -17,8 +17,9 @@ ISO_DATE_PATTERN = re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b")
 DMY_DATE_PATTERN = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b")
 MONTH_DATE_PATTERN = re.compile(r"\b(\d{1,2})\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})\b", re.IGNORECASE)
 
+# Cards print the number as one run or in spaced groups ("597 029 5035").
 NID_CONTEXT_PATTERN = re.compile(
-    r"\b(?:ID|NID)\s*(?:NO|NUMBER|নং)?\.?\s*[:：]?\s*([0-9০-৯]{8,17})\b",
+    r"\b(?:ID|NID)\s*(?:NO|NUMBER|নং)?\.?\s*[:：]?\s*([0-9০-৯]{3,17}(?:[  ][0-9০-৯]{2,6}){0,4})",
     re.IGNORECASE,
 )
 
@@ -82,17 +83,19 @@ def normalize_digits(value: str) -> str:
 
 def find_nid_number(text: str) -> FieldResult:
     context_match = NID_CONTEXT_PATTERN.search(text)
-    if context_match:
+    if context_match and len(re.sub(r"\D", "", normalize_digits(context_match.group(1)))) >= 8:
         return FieldResult(
-            raw_value=normalize_digits(context_match.group(1)),
+            raw_value=re.sub(r"\D", "", normalize_digits(context_match.group(1))),
             confidence=0.90,
             needs_review=False,
             source="id-context-regex",
         )
-    candidates = re.findall(r"\b[0-9০-৯]{10,17}\b", text)
-    if not candidates:
+    # Fallback: a long digit run anywhere, in one piece or in spaced groups ("597 029 5035").
+    candidates = re.findall(r"\b[0-9০-৯]{3,17}(?:[  ][0-9০-৯]{2,6}){0,4}\b", text)
+    normalized = [re.sub(r"\D", "", normalize_digits(item)) for item in candidates]
+    normalized = [item for item in normalized if len(item) in (10, 13, 17)]
+    if not normalized:
         return empty_field()
-    normalized = [normalize_digits(item) for item in candidates]
     value = max(normalized, key=lambda item: (len(item) in (10, 13, 17), len(item)))
     return FieldResult(raw_value=value, confidence=0.70, needs_review=True, source="regex")
 

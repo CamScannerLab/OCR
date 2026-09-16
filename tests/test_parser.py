@@ -66,3 +66,16 @@ class EvaluationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpacedNIDNumberTests(unittest.TestCase):
+    def test_number_printed_in_groups(self):
+        from nid_ocr_lab.parsers.nid_parser import find_nid_number
+
+        self.assertEqual(find_nid_number("NID No: 597 029 5035").raw_value, "5970295035")
+        self.assertEqual(find_nid_number("ID NO: 8713389347").raw_value, "8713389347")
+        # a misread label still leaves the digits findable
+        self.assertEqual(find_nid_number("(৮9. nove 597 029 5035").raw_value, "5970295035")
+        # short or date-like runs are not NID numbers
+        self.assertIsNone(find_nid_number("Date of Birth 10 Dec 1989").raw_value)
+        self.assertIsNone(find_nid_number("NID No: 597").raw_value)

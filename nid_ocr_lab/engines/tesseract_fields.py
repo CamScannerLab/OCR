@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
@@ -8,7 +9,9 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
+from nid_ocr_lab.engines.tessdata import get_variant
 from nid_ocr_lab.engines.tesseract import TesseractEngine
+from nid_ocr_lab.engines.tesseract_reader import line_reader
 from nid_ocr_lab.models import BoundingBox, OCRResult, OCRTextBlock
 from nid_ocr_lab.parsers.nid_parser import script_share
 
@@ -56,6 +59,7 @@ class RowBox:
     page_value: str
     page_confidence: float | None
     line_key: tuple[int, ...] | None
+    value_line_key: tuple[int, ...] | None = None  # set when the value sits on the line below the label
 
 
 def refine_nid_fields(
@@ -65,9 +69,12 @@ def refine_nid_fields(
     variant: str | None,
     workdir: Path,
     languages: dict[str, list[str]] | None = None,
+    reader: Any | None = None,
 ) -> OCRResult:
     """Re-read each NID row with one script at PSM 7 and restore rows the page pass dropped."""
     languages = {"ben": ["ben"], "eng": ["eng"], "digits": ["eng"], **(languages or {})}
+    reader = reader or line_reader(engine)
+    model = get_variant(variant)
     lines = group_lines(page.metadata.get("words") or [])
     with Image.open(image_path) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
@@ -79,8 +86,9 @@ def refine_nid_fields(
     claimed: set[tuple[int, ...]] = set()
     entries: list[tuple[float, str, OCRTextBlock]] = []
     for index, box in enumerate(rows):
-        if box.line_key is not None:
-            claimed.add(box.line_key)
+        for key in (box.line_key, box.value_line_key):
+            if key is not None:
+                claimed.add(key)
         value_left = box.value_left if box.value_left is not None else box.label_right
         region = (value_left, box.top, box.right, box.bottom)
         candidates = []
@@ -92,18 +100,17 @@ def refine_nid_fields(
                 break
             crop_path = workdir / f"field-{index}-{box.row.field}-psm{psm}.png"
             save_line_crop(image, region, crop_path, border=border)
-            ocr = engine.recognize(
+            started = time.perf_counter()
+            read = reader.read(
                 crop_path,
+                model.directory,
                 languages[box.row.script],
-                preprocessing=f"field_{box.row.field}",
-                psm=psm,
-                variant=variant,
-                dpi=CROP_DPI,
-                config=DIGIT_WHITELIST if box.row.script == "digits" else None,
+                psm,
+                DIGIT_WHITELIST if box.row.script == "digits" else None,
             )
             calls += 1
-            latency += ocr.latency_ms or 0.0
-            candidates.append(candidate(f"reread-psm{psm}", clean_value(ocr.full_text), mean_confidence(ocr), box.row))
+            latency += (time.perf_counter() - started) * 1000
+            candidates.append(candidate(f"reread-psm{psm}", clean_value(read.text), read.confidence, box.row))
         best = max(candidates, key=lambda item: item["score"], default=None)
         if best and best["score"] > 0:
             text, confidence = best["text"], best["confidence"]
@@ -151,6 +158,7 @@ def refine_nid_fields(
             "page_full_text": page.full_text,
             "fields": fields,
             "field_calls": calls,
+            "field_reader": reader.name,
         },
     )
 
@@ -184,6 +192,16 @@ def match_row(words: list[dict[str, Any]], row: NIDRow) -> int | None:
     return None
 
 
+def value_below(ordered: list[tuple[tuple[int, ...], list[dict[str, Any]]]], position: int):
+    """The next line, when it holds this row's value: some NID cards print the label on its own line."""
+    if position + 1 >= len(ordered):
+        return None, []
+    key, words = ordered[position + 1]
+    if any(match_row(words, row) is not None for row in NID_ROWS):
+        return None, []  # the next line is another label, so this row has no value
+    return key, words
+
+
 def box_edges(words: list[dict[str, Any]]) -> tuple[float, float, float, float]:
     boxes = [word["bounding_box"] for word in words]
     return (
@@ -196,12 +214,14 @@ def box_edges(words: list[dict[str, Any]]) -> tuple[float, float, float, float]:
 
 def locate_rows(lines: dict[tuple[int, ...], list[dict[str, Any]]], image_size: tuple[int, int]) -> list[RowBox]:
     width, _height = image_size
+    ordered = list(lines.items())
     found: dict[int, RowBox] = {}
+    claimed: set[tuple[int, ...]] = set()
     last_top = float("-inf")
     for row_index, row in enumerate(NID_ROWS):
-        for key, words in lines.items():
+        for position, (key, words) in enumerate(ordered):
             left, top, right, bottom = box_edges(words)
-            if top <= last_top or key in {box.line_key for box in found.values()}:
+            if top <= last_top or key in claimed:
                 continue
             start = match_row(words, row)
             if start is None:
@@ -211,9 +231,17 @@ def locate_rows(lines: dict[tuple[int, ...], list[dict[str, Any]]], image_size: 
             value_words = words[start + count :]
             label_right = box_edges(label_words)[2]
             height = bottom - top
-            value_left = None
+            value_key = None
             if value_words:
                 value_left = max(label_right + 1, value_words[0]["bounding_box"]["x"] - 0.3 * height)
+            else:
+                # Layout with the label on its own line: the value is the line below it.
+                value_key, value_words = value_below(ordered, position)
+                if value_words:
+                    left, top, right, bottom = box_edges(value_words)
+                    value_left = left - 0.15 * (bottom - top)
+                else:
+                    value_left = None
             found[row_index] = RowBox(
                 row=row,
                 source="page",
@@ -226,7 +254,9 @@ def locate_rows(lines: dict[tuple[int, ...], list[dict[str, Any]]], image_size: 
                 page_value=clean_value(" ".join(word["text"] for word in value_words)),
                 page_confidence=mean_word_confidence(value_words),
                 line_key=key,
+                value_line_key=value_key,
             )
+            claimed.update({key} | ({value_key} if value_key else set()))
             last_top = top
             break
     if not found:
@@ -319,10 +349,6 @@ def candidate(source: str, text: str, confidence: float | None, row: NIDRow) -> 
         "confidence": confidence,
         "score": round((confidence or 0.0) * script_fit(text, row.script), 4),
     }
-
-
-def mean_confidence(ocr: OCRResult) -> float | None:
-    return mean_word_confidence(ocr.metadata.get("words") or [])
 
 
 def mean_word_confidence(words: list[dict[str, Any]]) -> float | None:

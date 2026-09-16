@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +27,7 @@ from nid_ocr_lab.dashboard.filters import (
     render_sdk_crop,
     save_filtered_image,
     save_sdk_crop,
+    rotate_clockwise,
 )
 from nid_ocr_lab.dashboard.indexer import build_index, dataset_health, load_annotation
 from nid_ocr_lab.dashboard.uploads import MAX_UPLOAD_BYTES, delete_upload, list_uploads, save_upload, upload_samples
@@ -36,13 +38,21 @@ from nid_ocr_lab.engines.paddleocr import PaddleOCREngine, is_available as paddl
 from nid_ocr_lab.engines.tessdata import list_variants, model_version
 from nid_ocr_lab.engines.tesseract import TesseractEngine, ocr_result_to_json
 from nid_ocr_lab.engines.tesseract_fields import refine_nid_fields
+from nid_ocr_lab.engines.tesseract_steps import inspect_steps
 from nid_ocr_lab.models import FIELD_NAMES, FieldResult, NIDData, OCRResult
 from nid_ocr_lab.pipeline import OCRPipeline
+from nid_ocr_lab.preprocessing.nid_pipeline import RECIPES, inspect_preprocessing
 from nid_ocr_lab.training.dataset import crop_line, dataset_stats, save_run, save_training_lines
 
 STATIC_DIR = Path(__file__).with_name("static")
 SWEEP_PSMS = [3, 4, 6, 11]
 OSD_MIN_CONFIDENCE = 2.0
+STEPS_ROOT = Path(__file__).resolve().parents[2] / "benchmark" / "generated" / "steps"
+PREPROCESS_ROOT = Path(__file__).resolve().parents[2] / "benchmark" / "generated" / "preprocess"
+MAX_STEP_RUNS = 20
+MAX_PREPROCESS_RUNS = 20
+STEP_FILE_PATTERN = re.compile(r"^/api/steps/([0-9]{8}-[0-9]{6}-[0-9a-f]{8})/([0-9a-z_-]+\.png)$")
+PREPROCESS_FILE_PATTERN = re.compile(r"^/api/preprocess/([0-9]{8}-[0-9]{6}-[0-9a-f]{8})/([0-9a-z_-]+\.png)$")
 RUN_CROP_PATTERN = re.compile(r"^/api/runs/([0-9a-z-]+)/crop$")
 UPLOAD_ITEM_PATTERN = re.compile(r"^/api/uploads/([0-9a-z-]+)$")
 
@@ -60,6 +70,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json(list_uploads())
         elif parsed.path == "/api/training/datasets":
             self.send_json(dataset_stats())
+        elif STEP_FILE_PATTERN.match(parsed.path):
+            self.send_step_file(*STEP_FILE_PATTERN.match(parsed.path).groups())
+        elif PREPROCESS_FILE_PATTERN.match(parsed.path):
+            self.send_preprocess_file(*PREPROCESS_FILE_PATTERN.match(parsed.path).groups())
         elif RUN_CROP_PATTERN.match(parsed.path):
             self.send_run_crop(RUN_CROP_PATTERN.match(parsed.path).group(1), parsed.query)
         elif parsed.path == "/api/health":
@@ -84,6 +98,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/ocr/run":
             self.run_ocr()
+        elif parsed.path == "/api/tesseract/steps":
+            self.run_steps()
+        elif parsed.path == "/api/preprocess/steps":
+            self.run_preprocess_steps()
         elif parsed.path == "/api/uploads":
             self.receive_upload()
         elif parsed.path == "/api/training/lines":
@@ -251,6 +269,38 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": True, **result})
 
+    def run_steps(self) -> None:
+        try:
+            payload = json.loads(self.read_body(1024 * 1024).decode("utf-8"))
+            result = run_steps_payload(payload)
+        except (RuntimeError, OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+            self.send_json({"ok": False, "error": str(exc)})
+            return
+        self.send_json({"ok": True, **result})
+
+    def run_preprocess_steps(self) -> None:
+        try:
+            payload = json.loads(self.read_body(1024 * 1024).decode("utf-8"))
+            result = run_preprocess_payload(payload)
+        except (RuntimeError, OSError, ValueError, json.JSONDecodeError) as exc:
+            self.send_json({"ok": False, "error": str(exc)})
+            return
+        self.send_json({"ok": True, **result})
+
+    def send_step_file(self, steps_id: str, name: str) -> None:
+        path = STEPS_ROOT / steps_id / name
+        if not path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, "Step image not found (only the newest runs are kept)")
+            return
+        self.send_bytes(path.read_bytes(), "image/png")
+
+    def send_preprocess_file(self, preprocess_id: str, name: str) -> None:
+        path = PREPROCESS_ROOT / preprocess_id / name
+        if not path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, "Preprocessing image not found (only the newest runs are kept)")
+            return
+        self.send_bytes(path.read_bytes(), "image/png")
+
     def send_static(self, name: str) -> None:
         path = (STATIC_DIR / name).resolve()
         if not str(path).startswith(str(STATIC_DIR.resolve())) or not path.exists():
@@ -379,35 +429,14 @@ def run_ocr_payload(payload: dict) -> dict:
     request_started = time.perf_counter()
     engine = payload.get("engine") or "tesseract"
     image_path = payload.get("image_path")
-    annotation_path = payload.get("annotation_path")
-    mode = payload.get("mode") or "enhance"
-    input_kind = payload.get("input") or "filter"
     language = payload.get("language") or "eng+ben"
     rotation = str(payload.get("rotation") or "auto")
     selected_model = payload.get("model") or None
-    if not image_path:
-        raise ValueError("image_path is required")
     if rotation not in ("auto", "0", "90", "180", "270"):
         raise ValueError("Rotation must be auto, 0, 90, 180, or 270")
 
     with tempfile.TemporaryDirectory(prefix="nid-ocr-dashboard-") as tmp:
-        if input_kind == "as_is":
-            ocr_input = Path(tmp) / "input.png"
-            mode = payload.get("mode") or "original"
-            image_info = save_as_uploaded(image_path, ocr_input, mode=mode)
-            input_mode = "as_uploaded"
-        elif annotation_path:
-            ocr_input = Path(tmp) / "filtered.png"
-            annotation = load_annotation(annotation_path) or {}
-            points = first_quad_points(annotation)
-            if not points:
-                raise ValueError("No 4-point annotation quad found")
-            image_info = save_sdk_crop(image_path, points, ocr_input, mode=mode)
-            input_mode = "filter_panel_crop"
-        else:
-            ocr_input = Path(tmp) / "filtered.png"
-            image_info = save_filtered_image(image_path, ocr_input, mode=mode)
-            input_mode = "filtered"
+        ocr_input, image_info, input_mode, mode = prepare_ocr_input(payload, Path(tmp))
         label = f"{input_mode}_{mode}"
         extra: dict = {}
         if engine == "tesseract":
@@ -494,7 +523,123 @@ def run_ocr_payload(payload: dict) -> dict:
     }
 
 
-def save_as_uploaded(image_path: str, target: Path, mode: str = "original") -> ImageInfo:
+def prepare_ocr_input(payload: dict, tmp: Path) -> tuple[Path, ImageInfo, str, str]:
+    """The exact image an engine reads: selected image, SDK crop/filter, and optional preview rotation."""
+    image_path = payload.get("image_path")
+    if not image_path:
+        raise ValueError("image_path is required")
+    mode = payload.get("mode") or "enhance"
+    prepared_rotation = int(payload.get("prepared_rotation") or 0)
+    if prepared_rotation not in (0, 90, 180, 270):
+        raise ValueError("prepared_rotation must be 0, 90, 180, or 270")
+    if (payload.get("input") or "filter") == "as_is":
+        ocr_input = tmp / "input.png"
+        mode = payload.get("mode") or "original"
+        return ocr_input, save_as_uploaded(image_path, ocr_input, mode=mode, rotation=prepared_rotation), "as_uploaded", mode
+    ocr_input = tmp / "filtered.png"
+    if payload.get("annotation_path"):
+        annotation = load_annotation(payload["annotation_path"]) or {}
+        points = first_quad_points(annotation)
+        if not points:
+            raise ValueError("No 4-point annotation quad found")
+        return ocr_input, save_sdk_crop(image_path, points, ocr_input, mode=mode, rotation=prepared_rotation), "filter_panel_crop", mode
+    return ocr_input, save_filtered_image(image_path, ocr_input, mode=mode, rotation=prepared_rotation), "filtered", mode
+
+
+def run_steps_payload(payload: dict) -> dict:
+    """Tesseract step inspector: same input preparation as /api/ocr/run, results kept in STEPS_ROOT/<id>."""
+    request_started = time.perf_counter()
+    rotation = str(payload.get("rotation") or "auto")
+    if rotation not in ("auto", "0", "90", "180", "270"):
+        raise ValueError("Rotation must be auto, 0, 90, 180, or 270")
+    languages = (payload.get("language") or "eng+ben").split("+")
+    psm = int(payload.get("psm") or 6)
+    dpi = int(payload["dpi"]) if payload.get("dpi") not in (None, "") else None
+    steps_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    workdir = STEPS_ROOT / steps_id
+    with tempfile.TemporaryDirectory(prefix="nid-ocr-steps-") as tmp:
+        ocr_input, image_info, input_mode, mode = prepare_ocr_input(payload, Path(tmp))
+        orientation = None
+        if rotation == "auto":
+            osd = TesseractEngine().detect_orientation(ocr_input)
+            degrees = osd.rotate if osd and osd.confidence >= OSD_MIN_CONFIDENCE else 0
+            orientation = {
+                "rotate": degrees,
+                "osd_rotate": osd.rotate if osd else None,
+                "confidence": osd.confidence if osd else None,
+                "script": osd.script if osd else None,
+                "decision": "osd" if osd and osd.confidence >= OSD_MIN_CONFIDENCE else f"kept 0° (OSD {'unsure' if osd else 'failed'}; confidence < {OSD_MIN_CONFIDENCE})",
+            }
+        else:
+            degrees = int(rotation)
+        result = inspect_steps(
+            rotated_copy(ocr_input, degrees),
+            languages,
+            payload.get("tesseract_variant") or "system",
+            psm,
+            workdir,
+            dpi=dpi,
+            threshold=payload.get("threshold"),
+            recognize=not payload.get("layout_only"),
+            debug_images=bool(payload.get("debug_images", True)),
+            fields=bool(payload.get("fields", True)),
+            orientation=orientation,
+        )
+    prune_steps()
+    return {
+        **result,
+        "steps_id": steps_id,
+        "image": {"source_name": Path(payload["image_path"]).name, "input_mode": input_mode, "filter_mode": mode, "rotation": degrees,
+                  "width": result["image"]["width"], "height": result["image"]["height"]},
+        "request_latency_ms": (time.perf_counter() - request_started) * 1000,
+    }
+
+
+def run_preprocess_payload(payload: dict) -> dict:
+    """Visible NID preprocessing pipeline: same input preparation as OCR, then local image transforms."""
+    request_started = time.perf_counter()
+    recipe = payload.get("recipe") or "nid_ink_v2_contrast"
+    if recipe not in RECIPES:
+        raise ValueError(f"Unknown preprocessing recipe: {recipe}")
+    preprocess_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    workdir = PREPROCESS_ROOT / preprocess_id
+    with tempfile.TemporaryDirectory(prefix="nid-ocr-preprocess-") as tmp:
+        ocr_input, image_info, input_mode, mode = prepare_ocr_input(payload, Path(tmp))
+        result = inspect_preprocessing(ocr_input, workdir, recipe)
+    prune_preprocess()
+    return {
+        **result,
+        "preprocess_id": preprocess_id,
+        "recipes": [{"id": key, "label": label} for key, label in RECIPES.items()],
+        "image": {
+            **result["image"],
+            "source_name": Path(payload["image_path"]).name,
+            "input_mode": input_mode,
+            "filter_mode": mode,
+            "prepared_width": image_info.width,
+            "prepared_height": image_info.height,
+        },
+        "request_latency_ms": (time.perf_counter() - request_started) * 1000,
+    }
+
+
+def prune_steps(keep: int = MAX_STEP_RUNS) -> None:
+    if not STEPS_ROOT.is_dir():
+        return
+    runs = sorted((path for path in STEPS_ROOT.iterdir() if path.is_dir()), reverse=True)
+    for stale in runs[keep:]:
+        shutil.rmtree(stale, ignore_errors=True)
+
+
+def prune_preprocess(keep: int = MAX_PREPROCESS_RUNS) -> None:
+    if not PREPROCESS_ROOT.is_dir():
+        return
+    runs = sorted((path for path in PREPROCESS_ROOT.iterdir() if path.is_dir()), reverse=True)
+    for stale in runs[keep:]:
+        shutil.rmtree(stale, ignore_errors=True)
+
+
+def save_as_uploaded(image_path: str, target: Path, mode: str = "original", rotation: int = 0) -> ImageInfo:
     """No crop or resize: EXIF orientation plus the optional filter, saved losslessly with DPI metadata kept."""
     if mode not in FILTER_MODES:
         raise ValueError(f"Unknown filter mode: {mode}")
@@ -505,6 +650,7 @@ def save_as_uploaded(image_path: str, target: Path, mode: str = "original") -> I
             image = apply_filter(image.convert("RGB"), mode)
         elif image.mode not in ("RGB", "L"):
             image = image.convert("RGB")
+        image = rotate_clockwise(image, rotation)
         image.save(target, **({"dpi": dpi} if dpi else {}))
         return ImageInfo(width=image.width, height=image.height, mode="as_uploaded")
 

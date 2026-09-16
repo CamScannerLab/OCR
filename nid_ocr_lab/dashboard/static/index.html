@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NID OCR Lab</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260915-pickfile">
+    <link rel="stylesheet" href="/static/styles.css?v=20260916-mainocr1">
   </head>
   <body>
     <aside class="sidebar">
@@ -54,7 +54,7 @@
 
         <article class="viewer">
           <div class="viewer-head">
-            <h3 id="filterHeading">Filter</h3>
+            <h3 id="filterHeading">Preview filter <span class="steps-sub">no OCR preprocessing here</span></h3>
             <select id="filterSelect">
               <option value="original">Original</option>
               <option value="enhance">Enhance</option>
@@ -64,7 +64,6 @@
               <option value="edge">Edge</option>
               <option value="gray">Gray</option>
               <option value="threshold">Threshold</option>
-              <option value="nid_ink">NID ink (remove emblem)</option>
               <option value="mask_overlay">Mask Overlay</option>
             </select>
           </div>
@@ -75,11 +74,33 @@
       </section>
 
       <article class="ocr-card">
-        <h3>OCR</h3>
+        <h3>OCR <span class="steps-sub">normal result · uses preprocessing when ready</span></h3>
         <div class="ocr-file-bar">
           <button id="ocrPickFileButton" type="button">Choose image / PDF from computer…</button>
           <span id="ocrFileInfo">OCR any JPEG, PNG, WEBP, TIFF, BMP or PDF from your computer. It is saved to benchmark/uploads (gitignored) and selected here.</span>
         </div>
+        <section class="inline-ocr-panel preprocess-card">
+        <h3>Preprocessing <span class="steps-sub">local NID cleanup before OCR · every image stays on this machine</span></h3>
+        <div class="ocr-controls steps-controls">
+          <label>
+            <span>Recipe</span>
+            <select id="preprocessRecipe">
+              <option value="off">Off</option>
+              <option value="nid_ink_v1">NID ink v1 (current green channel)</option>
+              <option value="nid_ink_v2_contrast" selected>NID ink v2 controlled contrast (best so far)</option>
+              <option value="nid_ink_v2">NID ink v2 masked ink</option>
+            </select>
+          </label>
+          <label class="check"><input id="preprocessUseForSteps" type="checkbox" checked> <span>Use final image for Run OCR</span></label>
+          <button id="preprocessRun" type="button">Run preprocessing</button>
+        </div>
+        <p class="flow-hint"><strong>Flow:</strong> choose filter/rotation → optionally Run preprocessing → Run OCR. If preprocessing is ready, Run OCR uses its final image. Otherwise it uses the filtered preview.</p>
+        <div id="preprocessStatus" class="ocr-status">Run preprocessing once. Then Run OCR will use this final preprocessed image while the checkbox is on.</div>
+        <div id="preprocessSummary" class="summary-chips steps-summary"></div>
+        <div id="preprocessTimeline" class="steps-timeline"></div>
+        </section>
+
+
         <div class="ocr-controls">
           <label>
             <span>Engine</span>
@@ -92,10 +113,10 @@
             </select>
           </label>
           <label>
-            <span>OCR input</span>
+            <span>Run OCR input</span>
             <select id="ocrInputSelect">
-              <option value="as_is">As uploaded + filter (no crop/resize)</option>
-              <option value="filter">Filter preview</option>
+              <option value="filter" selected>Filtered preview</option>
+              <option value="as_is">Selected source (debug)</option>
             </select>
           </label>
           <label>
@@ -143,6 +164,42 @@
           <button id="runOcrButton" type="button">Run OCR</button>
         </div>
         <div id="ocrStatus" class="ocr-status">Checking OCR engines...</div>
+        <section class="inline-ocr-panel steps-card">
+        <h3>OCR steps <span class="steps-sub">calculated by Run OCR · minimized</span></h3>
+        <div class="ocr-controls steps-controls">
+          <label>
+            <span>OCR step filter</span>
+            <select id="stepsFilter"></select>
+          </label>
+          <label>
+            <span>Threshold method</span>
+            <select id="stepsMethod">
+              <option value="otsu" selected>Otsu (Tesseract default)</option>
+              <option value="adaptive_otsu">Adaptive Otsu (Leptonica)</option>
+              <option value="sauvola">Sauvola</option>
+              <option value="manual">Manual value</option>
+            </select>
+          </label>
+          <label data-method="adaptive_otsu" hidden><span>Tile size × DPI</span><input id="stepsTileSize" type="number" min="0.01" max="10" step="0.01" value="0.33"></label>
+          <label data-method="adaptive_otsu" hidden><span>Smoothing × DPI</span><input id="stepsSmooth" type="number" min="0" max="10" step="0.01" value="0"></label>
+          <label data-method="adaptive_otsu" hidden><span>Score fraction</span><input id="stepsScore" type="number" min="0" max="1" step="0.01" value="0.1"></label>
+          <label data-method="sauvola" hidden><span>Window × DPI</span><input id="stepsWindow" type="number" min="0.01" max="10" step="0.01" value="0.33"></label>
+          <label data-method="sauvola" hidden><span>k factor</span><input id="stepsK" type="number" min="0" max="2" step="0.01" value="0.34"></label>
+          <label data-method="manual" class="steps-slider" hidden>
+            <span>Threshold value <output id="stepsValueOut">128</output></span>
+            <span class="slider-row"><input id="stepsValue" type="range" min="0" max="255" value="128"><input id="stepsValueNumber" type="number" min="0" max="255" value="128"></span>
+          </label>
+          <label><span>DPI (blank = auto)</span><input id="stepsDpi" type="number" min="70" max="2400" placeholder="auto"></label>
+          <label class="check"><input id="stepsLayoutOnly" type="checkbox"> <span>Layout only (skip LSTM)</span></label>
+          <label class="check"><input id="stepsDebug" type="checkbox" checked> <span>Tesseract debug images</span></label>
+          <label class="check"><input id="stepsFields" type="checkbox" checked> <span>NID fields re-read</span></label>
+        </div>
+        <div id="stepsStatus" class="ocr-status">Run OCR will calculate these Tesseract steps and keep each step minimized for inspection.</div>
+        <div id="stepsSummary" class="summary-chips steps-summary"></div>
+        <div id="stepsTimeline" class="steps-timeline"></div>
+        </section>
+
+
         <div class="ocr-results">
           <section class="ocr-summary-panel">
             <h4>Run Summary <span>dashboard metadata</span></h4>
@@ -196,6 +253,8 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260915-pickfile"></script>
+    <script src="/static/app.js?v=20260916-mainocr1"></script>
+    <script src="/static/preprocess.js?v=20260916-mainocr1"></script>
+    <script src="/static/steps.js?v=20260916-mainocr1"></script>
   </body>
 </html>
