@@ -19,6 +19,12 @@ Start here for setup, runtime, dashboard behavior, OCR status, installed tools, 
 
 [Developer.md](Developer.md)
 
+## Pipeline Walkthrough
+
+An interactive explainer of the preprocessing recipes and each Tesseract step, with diagrams and in-browser step viewers:
+
+[NID OCR Walkthrough](https://camscannerlab.github.io/OCR/Docs/nid_ocr_walkthrough.html) (source: [Docs/nid_ocr_walkthrough.html](Docs/nid_ocr_walkthrough.html))
+
 ## Current Boundary
 
 SmartScan is treated as the upstream image acquisition layer:
@@ -100,6 +106,8 @@ Normal filter choices in the dashboard crop/perspective-correct first, then appl
 ```text
 Docs/
   current_study.md
+  how_tesseract_works.md
+  nid_ocr_walkthrough.html
   ocr_pipeline_rnd_plan.md
 
 configs/
