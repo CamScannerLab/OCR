@@ -1,0 +1,849 @@
+<title>NID OCR Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans+Bengali:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F2F4F1; --surface:#FBFCFA; --sunk:#E7EBE6; --ink:#16201B; --muted:#58665E; --rule:#CFD7D0;
+  --accent:#1D7349; --accent-soft:#D6EBDD; --warm:#C8741F; --warm-soft:#F5E3CF; --blue:#2F5FB3;
+  --display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --bn:"Noto Sans Bengali","Kohinoor Bangla","Bangla MN",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1411; --surface:#151D19; --sunk:#1C2621; --ink:#E1E9E3; --muted:#93A399; --rule:#2C3831;
+    --accent:#62C792; --accent-soft:#1D3A2B; --warm:#E6A15C; --warm-soft:#3A2A18; --blue:#7FA6EC;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1411; --surface:#151D19; --sunk:#1C2621; --ink:#E1E9E3; --muted:#93A399; --rule:#2C3831;
+  --accent:#62C792; --accent-soft:#1D3A2B; --warm:#E6A15C; --warm-soft:#3A2A18; --blue:#7FA6EC;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+code{background:var(--sunk);padding:.08em .35em;border-radius:3px}
+.bn{font-family:var(--bn)}
+
+.shell{max-width:1160px;margin:0 auto;padding:48px 28px 96px;display:grid;grid-template-columns:200px minmax(0,1fr);gap:56px}
+nav.toc{position:sticky;top:28px;align-self:start;font-size:13px}
+nav.toc p{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+nav.toc ol{list-style:none;margin:0 0 22px;padding:0;display:grid;gap:4px}
+nav.toc a{color:var(--muted);text-decoration:none;display:block;padding:2px 0}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--ink)}
+@media (max-width:960px){.shell{grid-template-columns:1fr;gap:0}nav.toc{display:none}}
+
+main{min-width:0}
+header.top{padding-bottom:36px;border-bottom:1px solid var(--rule);margin-bottom:12px}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-family:var(--display);font-variation-settings:"wdth" 112;font-weight:780;font-size:clamp(34px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance}
+.lede{font-size:19px;line-height:1.55;max-width:62ch;margin:0;color:var(--ink)}
+.facts{display:flex;flex-wrap:wrap;gap:8px 22px;margin:22px 0 0;padding:0;list-style:none;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.facts b{color:var(--ink);font-weight:500}
+
+section{padding-top:56px}
+h2{font-family:var(--display);font-variation-settings:"wdth" 108;font-weight:740;font-size:30px;line-height:1.1;letter-spacing:-.01em;margin:0 0 14px;text-wrap:balance}
+h2 .part{display:block;font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;font-variation-settings:normal}
+h3{font-family:var(--display);font-variation-settings:"wdth" 104;font-weight:680;font-size:21px;line-height:1.2;margin:40px 0 10px;text-wrap:balance}
+p{max-width:68ch;margin:0 0 14px}
+.muted{color:var(--muted)}
+
+figure{margin:26px 0 8px}
+figure .scroll{overflow-x:auto}
+figure svg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted);max-width:72ch;margin-top:10px;line-height:1.5}
+
+/* diagram marks, themed through tokens */
+.dg text{fill:var(--ink);font-family:var(--body);font-size:13px}
+.dg text.sub{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.dg text.lab{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+.dg text.grp{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;fill:var(--muted)}
+.dg text.hot{fill:var(--accent);font-weight:500}
+.dg text.warm{fill:var(--warm)}
+.dg .box{fill:var(--surface);stroke:var(--rule);stroke-width:1.2}
+.dg .box.ours{fill:var(--sunk)}
+.dg .box.hot{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.dg .box.warm{fill:var(--warm-soft);stroke:var(--warm)}
+.dg .edge{fill:none;stroke:var(--muted);stroke-width:1.3}
+.dg .edge.hot{stroke:var(--accent);stroke-width:1.8}
+.dg .edge.dash{stroke-dasharray:5 4}
+.dg .ah{fill:var(--muted)}
+.dg .ah.hot{fill:var(--accent)}
+
+/* interactive viewers */
+.viewer{background:var(--surface);border:1px solid var(--rule);border-radius:8px;margin:26px 0 8px;overflow:hidden}
+.viewer-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.viewer-head .t{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tag{font-family:var(--mono);font-size:11px;color:var(--warm);border:1px solid var(--warm);border-radius:99px;padding:1px 8px}
+.viewer-body{display:grid;grid-template-columns:230px minmax(0,1fr)}
+@media (max-width:760px){.viewer-body{grid-template-columns:1fr}}
+.steps{border-right:1px solid var(--rule);padding:8px;display:flex;flex-direction:column;gap:2px}
+@media (max-width:760px){.steps{border-right:0;border-bottom:1px solid var(--rule);flex-direction:row;flex-wrap:wrap}}
+.steps button,.seg button{font:inherit;cursor:pointer;border:0;background:transparent;color:var(--muted);text-align:left}
+.steps button{font-family:var(--mono);font-size:12px;padding:7px 10px;border-radius:5px;line-height:1.3}
+.steps button:hover{background:var(--sunk);color:var(--ink)}
+.steps button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink)}
+.steps .div{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 10px 4px}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.stage{padding:16px;min-width:0}
+.stage canvas{display:block;width:100%;height:auto;border-radius:4px;background:#fff;image-rendering:auto}
+.stage h4{font-family:var(--display);font-variation-settings:"wdth" 104;font-size:17px;font-weight:680;margin:14px 0 4px}
+.stage .fname{font-family:var(--mono);font-size:12px;color:var(--accent)}
+.stage p{font-size:14.5px;margin:4px 0 10px;max-width:none}
+.formula{font-family:var(--mono);font-size:12.5px;background:var(--sunk);border-radius:5px;padding:8px 10px;margin:0 0 10px;overflow-x:auto;white-space:pre}
+.metrics{display:flex;flex-wrap:wrap;gap:6px}
+.metrics span{font-family:var(--mono);font-size:11.5px;border:1px solid var(--rule);border-radius:4px;padding:2px 7px;color:var(--muted);font-variant-numeric:tabular-nums}
+.metrics b{color:var(--ink);font-weight:500}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.seg button{font-family:var(--mono);font-size:11.5px;padding:5px 10px;border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.tess-controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.tess-controls label{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.tess-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:0}
+@media (max-width:900px){.tess-grid{grid-template-columns:1fr}}
+.tess-side{border-left:1px solid var(--rule);padding:14px 16px;font-size:13.5px}
+@media (max-width:900px){.tess-side{border-left:0;border-top:1px solid var(--rule)}}
+.tess-side h5{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:500}
+.hist svg{width:100%;height:auto;display:block}
+.hist text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+.hist .bars{fill:var(--muted);opacity:.55}
+.hist .axis{stroke:var(--rule)}
+.hist .thr{stroke:var(--accent);stroke-width:2}
+.hist text.thr-l{fill:var(--accent);font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;margin:18px 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-variant-numeric:tabular-nums;margin:0 0 14px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;text-align:right}
+.note{font-size:12px;color:var(--muted);margin-top:10px}
+
+/* reference list for preprocessing steps */
+.ref{list-style:none;padding:0;margin:20px 0;display:grid;gap:0;border-top:1px solid var(--rule)}
+.ref li{display:grid;grid-template-columns:190px minmax(0,1fr);gap:6px 24px;padding:16px 0;border-bottom:1px solid var(--rule)}
+@media (max-width:640px){.ref li{grid-template-columns:1fr}}
+.ref .f{font-family:var(--mono);font-size:12.5px;color:var(--accent);padding-top:2px;word-break:break-all}
+.ref h4{margin:0 0 4px;font-size:16px;font-weight:600}
+.ref p{margin:0 0 6px;font-size:14.5px}
+.ref .why{color:var(--muted)}
+
+.callout{border:1px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:14px 18px;margin:22px 0;max-width:72ch}
+.callout p{margin:0;font-size:15px}
+.callout b{font-weight:600}
+
+/* CTC strip */
+.ctc{display:grid;grid-template-columns:110px repeat(11,minmax(34px,1fr));gap:4px;align-items:center;font-family:var(--mono);font-size:14px;margin:22px 0 6px;min-width:560px}
+.ctc .h{font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.ctc .c{text-align:center;padding:6px 0;border-radius:4px;background:var(--sunk)}
+.ctc .c.blank{color:var(--muted);background:transparent;border:1px dashed var(--rule)}
+.ctc .c.keep{background:var(--accent-soft);color:var(--ink);font-weight:500}
+.ctc .out{grid-column:2 / -1;font-size:18px;letter-spacing:.2em;color:var(--accent);font-weight:500}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Overview</p>
+  <ol><li><a href="#flow">Whole pipeline</a></li></ol>
+  <p>1 · Preprocessing</p>
+  <ol>
+    <li><a href="#recipes">Recipes</a></li>
+    <li><a href="#pre-view">Step viewer</a></li>
+    <li><a href="#pre-ref">Step reference</a></li>
+  </ol>
+  <p>2 · Tesseract</p>
+  <ol>
+    <li><a href="#tess-stages">Stages</a></li>
+    <li><a href="#tess-view">Layout viewer</a></li>
+    <li><a href="#threshold">Thresholding</a></li>
+    <li><a href="#layout">Layout &amp; PSM</a></li>
+    <li><a href="#lstm">LSTM recognition</a></li>
+    <li><a href="#fields">NID field re-read</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <p class="kicker">nid_ocr_lab · R&amp;D</p>
+  <h1>From card photo to NID fields</h1>
+  <p class="lede">What happens to an NID image in our pipeline. First, the preprocessing recipes that clean the ink before OCR. Then each step inside Tesseract, from a greyscale image to the text of each field.</p>
+  <ul class="facts">
+    <li>Tesseract <b>5.5.3</b> · Leptonica <b>1.87</b></li>
+    <li>Engine <b>--oem 1</b> (LSTM only)</li>
+    <li>Page default <b>--psm 6</b></li>
+    <li>Models <b>ben + eng</b></li>
+  </ul>
+</header>
+
+<!-- ============ OVERVIEW ============ -->
+<section id="flow">
+  <h2><span class="part">Overview</span>The whole pipeline in one picture</h2>
+  <p>Three owners touch the image. Our code prepares it. Tesseract binarizes it, finds the lines and reads them. Then our code reads each NID row again and parses the fields. The green dashed path is the one people miss: the black-and-white image is only used to find the text. The LSTM reads each line from the non-binary image.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 400" role="img" aria-label="Pipeline: our preprocessing and rotation feed Tesseract; Tesseract thresholds and runs layout on a binary image, but the LSTM reads line crops from the original image; our code then re-reads NID fields and parses them.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a1h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah hot" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+
+      <text class="grp" x="20" y="26">BEFORE TESSERACT · OUR CODE</text>
+      <g>
+        <rect class="box ours" x="20" y="36" width="176" height="54" rx="5"/>
+        <text x="108" y="58" text-anchor="middle">Upload</text><text class="sub" x="108" y="76" text-anchor="middle">NID photo</text>
+        <rect class="box ours" x="226" y="36" width="176" height="54" rx="5"/>
+        <text x="314" y="58" text-anchor="middle">EXIF orientation</text><text class="sub" x="314" y="76" text-anchor="middle">exif_transpose → RGB</text>
+        <rect class="box ours" x="432" y="36" width="176" height="54" rx="5"/>
+        <text x="520" y="58" text-anchor="middle">Crop + filter</text><text class="sub" x="520" y="76" text-anchor="middle">quad → 85.6 × 54 mm</text>
+        <rect class="box hot" x="638" y="36" width="176" height="54" rx="5"/>
+        <text x="726" y="58" text-anchor="middle">Preprocess recipe</text><text class="sub" x="726" y="76" text-anchor="middle">nid_ink_v2_contrast</text>
+        <rect class="box ours" x="844" y="36" width="176" height="54" rx="5"/>
+        <text x="932" y="58" text-anchor="middle">Rotation</text><text class="sub" x="932" y="76" text-anchor="middle">OSD psm 0 · conf ≥ 2.0</text>
+      </g>
+      <g>
+        <line class="edge" x1="196" y1="63" x2="224" y2="63" marker-end="url(#a1)"/>
+        <line class="edge" x1="402" y1="63" x2="430" y2="63" marker-end="url(#a1)"/>
+        <line class="edge" x1="608" y1="63" x2="636" y2="63" marker-end="url(#a1)"/>
+        <line class="edge" x1="814" y1="63" x2="842" y2="63" marker-end="url(#a1)"/>
+        <path class="edge" d="M932 90 V132 H60 V176" marker-end="url(#a1)"/>
+        <text class="lab" x="496" y="126" text-anchor="middle">upright, cleaned image → TessBaseAPI::SetImage</text>
+      </g>
+
+      <text class="grp" x="120" y="170">INSIDE TESSERACT · ONE C-API RUN</text>
+      <g>
+        <rect class="box" x="12" y="180" width="96" height="54" rx="5"/><text x="60" y="202" text-anchor="middle">Greyscale</text><text class="sub" x="60" y="220" text-anchor="middle">pixConvertTo8</text>
+        <rect class="box warm" x="127" y="180" width="96" height="54" rx="5"/><text x="175" y="202" text-anchor="middle">Threshold</text><text class="sub" x="175" y="220" text-anchor="middle">Otsu → binary</text>
+        <rect class="box" x="242" y="180" width="96" height="54" rx="5"/><text x="290" y="202" text-anchor="middle">Blobs</text><text class="sub" x="290" y="220" text-anchor="middle">conn. comp.</text>
+        <rect class="box" x="357" y="180" width="96" height="54" rx="5"/><text x="405" y="202" text-anchor="middle">Blocks</text><text class="sub" x="405" y="220" text-anchor="middle">text / image</text>
+        <rect class="box" x="472" y="180" width="96" height="54" rx="5"/><text x="520" y="202" text-anchor="middle">Paragraphs</text><text class="sub" x="520" y="220" text-anchor="middle">indent, gaps</text>
+        <rect class="box" x="587" y="180" width="96" height="54" rx="5"/><text x="635" y="202" text-anchor="middle">Lines</text><text class="sub" x="635" y="220" text-anchor="middle">baselines</text>
+        <rect class="box" x="702" y="180" width="96" height="54" rx="5"/><text x="750" y="202" text-anchor="middle">Words</text><text class="sub" x="750" y="220" text-anchor="middle">gap size</text>
+        <rect class="box hot" x="817" y="180" width="96" height="54" rx="5"/><text x="865" y="202" text-anchor="middle">LSTM read</text><text class="sub" x="865" y="220" text-anchor="middle">per line</text>
+        <rect class="box" x="932" y="180" width="96" height="54" rx="5"/><text x="980" y="202" text-anchor="middle">Page text</text><text class="sub" x="980" y="220" text-anchor="middle">+ confidence</text>
+      </g>
+      <g>
+        <line class="edge" x1="108" y1="207" x2="125" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="223" y1="207" x2="240" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="338" y1="207" x2="355" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="453" y1="207" x2="470" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="568" y1="207" x2="585" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="683" y1="207" x2="700" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="798" y1="207" x2="815" y2="207" marker-end="url(#a1)"/>
+        <line class="edge" x1="913" y1="207" x2="930" y2="207" marker-end="url(#a1)"/>
+        <path class="edge hot dash" d="M40 234 V268 H850 V236" marker-end="url(#a1h)"/>
+        <text class="lab hot" x="445" y="286" text-anchor="middle">line boxes come from the binary · pixels come from the original image</text>
+        <text class="lab" x="520" y="252" text-anchor="middle">layout sees only the binary image →</text>
+      </g>
+
+      <text class="grp" x="432" y="318">AFTER TESSERACT · OUR CODE</text>
+      <g>
+        <path class="edge" d="M980 234 V326" marker-end="url(#a1)"/>
+        <rect class="box ours" x="844" y="328" width="176" height="54" rx="5"/>
+        <text x="932" y="350" text-anchor="middle">Field re-read</text><text class="sub" x="932" y="368" text-anchor="middle">crop per row · PSM 7 → 13</text>
+        <rect class="box ours" x="638" y="328" width="176" height="54" rx="5"/>
+        <text x="726" y="350" text-anchor="middle">NIDParser</text><text class="sub" x="726" y="368" text-anchor="middle">labels → values</text>
+        <rect class="box hot" x="432" y="328" width="176" height="54" rx="5"/>
+        <text x="520" y="350" text-anchor="middle">NID fields</text><text class="sub" x="520" y="368" text-anchor="middle">name, DOB, ID NO …</text>
+        <line class="edge" x1="844" y1="355" x2="816" y2="355" marker-end="url(#a1)"/>
+        <line class="edge" x1="638" y1="355" x2="610" y2="355" marker-end="url(#a1)"/>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Grey boxes are our code (<code>dashboard/server.py</code>, <code>preprocessing/nid_pipeline.py</code>, <code>engines/tesseract_fields.py</code>). White boxes are Tesseract. Orange marks the step that throws information away (binarization). Green marks what we control and what does the reading.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ PART 1 ============ -->
+<section id="recipes">
+  <h2><span class="part">Part 1 · Preprocessing</span>Four recipes, one final image</h2>
+  <p>Before OCR, <code>inspect_preprocessing()</code> runs one recipe on the image. Each step is saved as a numbered PNG in the working folder. The recipe hands one file, <code>99-final-ocr.png</code>, to Tesseract. On an NID card the enemy is colour: a yellow-orange emblem and a guilloche watermark sit behind black text. Every recipe starts by dropping the red and blue channels for that reason.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 320" role="img" aria-label="Preprocessing recipes: off passes the input unchanged; v1 is green channel then autocontrast; v2 divides the green channel by a blurred background estimate, stretches contrast, and either stops there (v2 contrast) or builds an ink mask and blends it (v2 masked). All end at 99-final-ocr.png.">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a2h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah hot" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+
+      <!-- input -->
+      <rect class="box ours" x="10" y="170" width="120" height="46" rx="5"/>
+      <text x="70" y="189" text-anchor="middle">Input</text><text class="sub" x="70" y="206" text-anchor="middle">00-input.png</text>
+
+      <!-- off -->
+      <path class="edge" d="M70 170 V40 H970 V168" marker-end="url(#a2)"/>
+      <text class="lab" x="520" y="33" text-anchor="middle">off · unchanged baseline</text>
+
+      <!-- v1 -->
+      <path class="edge" d="M130 193 H145 V113 H158" marker-end="url(#a2)"/>
+      <rect class="box" x="160" y="90" width="120" height="46" rx="5"/>
+      <text x="220" y="109" text-anchor="middle">Green channel</text><text class="sub" x="220" y="126" text-anchor="middle">01-green-channel</text>
+      <line class="edge" x1="280" y1="113" x2="308" y2="113" marker-end="url(#a2)"/>
+      <rect class="box" x="310" y="90" width="120" height="46" rx="5"/>
+      <text x="370" y="109" text-anchor="middle">Autocontrast 1%</text><text class="sub" x="370" y="126" text-anchor="middle">02-nid-ink-v1</text>
+      <path class="edge" d="M430 113 H880 L910 176" marker-end="url(#a2)"/>
+      <text class="lab" x="655" y="106" text-anchor="middle">nid_ink_v1</text>
+
+      <!-- v2 main row -->
+      <line class="edge" x1="130" y1="193" x2="158" y2="193" marker-end="url(#a2)"/>
+      <rect class="box" x="160" y="170" width="120" height="46" rx="5"/>
+      <text x="220" y="189" text-anchor="middle">Green channel</text><text class="sub" x="220" y="206" text-anchor="middle">01-green-channel</text>
+      <line class="edge" x1="280" y1="193" x2="308" y2="193" marker-end="url(#a2)"/>
+      <text class="lab" x="294" y="186" text-anchor="middle">blur</text>
+      <rect class="box warm" x="310" y="170" width="120" height="46" rx="5"/>
+      <text x="370" y="189" text-anchor="middle">Background</text><text class="sub" x="370" y="206" text-anchor="middle">02-background-est.</text>
+      <line class="edge" x1="430" y1="193" x2="458" y2="193" marker-end="url(#a2)"/>
+      <text class="lab" x="444" y="186" text-anchor="middle">÷</text>
+      <path class="edge" d="M220 170 V153 H500 V168" marker-end="url(#a2)"/>
+      <text class="lab" x="360" y="148" text-anchor="middle">numerator: green channel</text>
+      <rect class="box" x="460" y="170" width="120" height="46" rx="5"/>
+      <text x="520" y="189" text-anchor="middle">Normalized</text><text class="sub" x="520" y="206" text-anchor="middle">03-bg-normalized</text>
+      <line class="edge" x1="580" y1="193" x2="608" y2="193" marker-end="url(#a2)"/>
+      <rect class="box hot" x="610" y="170" width="120" height="46" rx="5"/>
+      <text x="670" y="189" text-anchor="middle">Contrast 0.5%</text><text class="sub" x="670" y="206" text-anchor="middle">04-controlled-contr.</text>
+      <line class="edge hot" x1="730" y1="193" x2="908" y2="193" marker-end="url(#a2h)"/>
+      <text class="lab hot" x="820" y="186" text-anchor="middle">nid_ink_v2_contrast</text>
+
+      <!-- mask row -->
+      <line class="edge" x1="650" y1="216" x2="650" y2="248" marker-end="url(#a2)"/>
+      <text class="lab" x="632" y="238" text-anchor="end">≤ p38</text>
+      <rect class="box" x="610" y="250" width="120" height="46" rx="5"/>
+      <text x="670" y="269" text-anchor="middle">Ink mask</text><text class="sub" x="670" y="286" text-anchor="middle">05-ink-mask</text>
+      <path class="edge" d="M715 216 V232 H820 V248" marker-end="url(#a2)"/>
+      <text class="lab" x="770" y="228" text-anchor="middle">grey</text>
+      <line class="edge" x1="730" y1="273" x2="758" y2="273" marker-end="url(#a2)"/>
+      <rect class="box" x="760" y="250" width="120" height="46" rx="5"/>
+      <text x="820" y="269" text-anchor="middle">Masked blend</text><text class="sub" x="820" y="286" text-anchor="middle">06-nid-ink-v2-masked</text>
+      <path class="edge" d="M880 273 L912 216" marker-end="url(#a2)"/>
+      <text class="lab" x="905" y="258">nid_ink_v2</text>
+
+      <!-- final -->
+      <rect class="box hot" x="910" y="170" width="120" height="46" rx="5"/>
+      <text x="970" y="189" text-anchor="middle">To Tesseract</text><text class="sub" x="970" y="206" text-anchor="middle">99-final-ocr.png</text>
+    </svg>
+    </div>
+    <figcaption>The recipe decides which file becomes <code>99-final-ocr.png</code>. <code>nid_ink_v2_contrast</code> is the best manual flow so far: it stops at step 04. The two v2 recipes run the same steps, and <code>nid_ink_v2</code> goes on through the mask and the blend. v2 always saves 05 and 06 so you can compare them.</figcaption>
+  </figure>
+</section>
+
+<section id="pre-view">
+  <h3>Step viewer</h3>
+  <p>The viewer runs the same maths as <code>nid_pipeline.py</code> in your browser. The input is a made-up NID-style tile with a shadow, a glare spot and an emblem. Click a file to see that step's output and its real pixel statistics.</p>
+
+  <div class="viewer" id="preViewer">
+    <div class="viewer-head"><span class="t">nid_ink_v2 · in-browser replica</span><span class="tag">synthetic sample · not a real NID</span></div>
+    <div class="viewer-body">
+      <div class="steps" id="preSteps" role="group" aria-label="Preprocessing step"></div>
+      <div class="stage">
+        <canvas id="preCanvas" width="960" height="380" aria-label="Output image of the selected preprocessing step"></canvas>
+        <h4 id="preTitle">Input image</h4>
+        <div class="fname" id="preFile">00-input.png</div>
+        <p id="preExplain"></p>
+        <div class="formula" id="preFormula"></div>
+        <div class="metrics" id="preMetrics"></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The browser replica uses the cv2 path, as the dashboard does when OpenCV is installed. Rounding at the edges can differ by a grey level or two from the Python output.</p>
+</section>
+
+<section id="pre-ref">
+  <h3>Step reference</h3>
+  <p>The constants below are the values in the code today. Change them and the output changes.</p>
+  <ol class="ref">
+    <li><div class="f">00-input.png</div><div>
+      <h4>Input image</h4>
+      <p><code>ImageOps.exif_transpose</code> fixes phone orientation, then the image is converted to RGB. The DPI metadata is kept and written into every later PNG.</p>
+      <p class="why">Why: a sideways EXIF flag would reach Tesseract as rotated text. Losing DPI makes Tesseract guess the text size.</p></div></li>
+    <li><div class="f">01-green-channel.png</div><div>
+      <h4>Green channel</h4>
+      <p><code>image.getchannel("G")</code>. Keep one of three channels and drop the other two.</p>
+      <p class="why">Why: yellow and orange are bright in green, so the emblem fades toward the card background. Black text is dark in every channel, so it stays dark.</p></div></li>
+    <li><div class="f">02-background-estimate.png</div><div>
+      <h4>Background estimate</h4>
+      <p>Gaussian blur. Radius <code>max(9, min(w,h) // 28)</code>, kernel <code>max(17, radius | 1)</code>, and cv2 derives sigma from the kernel. Without OpenCV it falls back to PIL <code>GaussianBlur(radius)</code>.</p>
+      <p class="why">Why: the blur is wide enough to wipe out text strokes. What is left is paper tone, emblem, shadow and glare, which are the things to remove.</p></div></li>
+    <li><div class="f">03-background-normalized.png</div><div>
+      <h4>Background normalized</h4>
+      <p><code>green / max(bg, 1) × p88(bg)</code>, clipped to 0–255. Dividing flattens slow changes in light. Multiplying by the 88th percentile of the background keeps the paper near its original brightness.</p>
+      <p class="why">Why: a shadow darkens text and paper by the same factor, and division cancels it. Subtraction can't do that.</p></div></li>
+    <li><div class="f">04-controlled-contrast.png</div><div>
+      <h4>Controlled contrast</h4>
+      <p><code>ImageOps.autocontrast(cutoff=0.5)</code>. Clip 0.5% of pixels at each end of the histogram and stretch the rest to 0–255. v1 clips 1%.</p>
+      <p class="why">Why: after normalization, gentler clipping is enough. It keeps thin Bengali strokes (matra, vowel signs) that 1% clipping can erase. <b>Current best final image.</b></p></div></li>
+    <li><div class="f">05-ink-mask.png</div><div>
+      <h4>Ink mask (diagnostic)</h4>
+      <p>A pixel is ink if it is ≤ the 38th percentile, with that cutoff clamped to 20–245. Then a morphological open with a 2×2 kernel removes single-pixel specks.</p>
+      <p class="why">Why: it shows what counts as ink. It assumes about 38% of the image is ink or dark, which is a guess tuned for card crops, so treat it as a check and not as ground truth.</p></div></li>
+    <li><div class="f">06-nid-ink-v2-masked.png</div><div>
+      <h4>Masked text-ink image</h4>
+      <p>Outside the mask: <code>px × 1.06 + 6</code>, which lightens. Inside the mask: <code>px × 0.78</code>, which darkens. The result stays greyscale.</p>
+      <p class="why">Why: stronger ink and paper separation without a hard binary, because the LSTM reads grey better than black and white. It is the final image only for <code>nid_ink_v2</code>.</p></div></li>
+    <li><div class="f">99-final-ocr.png</div><div>
+      <h4>Final OCR image</h4>
+      <p>A copy of the recipe's chosen output: 00 (off), 02 (v1), 04 (v2 contrast) or 06 (v2 masked). It is saved with the original DPI.</p>
+      <p class="why">Why a separate file: Tesseract always reads one predictable path, so recipes can be swapped without touching the engine code.</p></div></li>
+  </ol>
+</section>
+
+<!-- ============ PART 2 ============ -->
+<section id="tess-stages">
+  <h2><span class="part">Part 2 · Tesseract</span>Inside one Tesseract run</h2>
+  <p><code>inspect_steps()</code> in <code>engines/tesseract_steps.py</code> calls Tesseract once through the C API. It saves every intermediate result so the dashboard can show it. Tesseract works in two phases. <b>Layout</b> finds where the text is without reading anything. <b>Recognition</b> reads one line at a time.</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Step</th><th>What Tesseract does</th><th>Reads</th><th>Dashboard evidence</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1</td><td>Input + DPI</td><td>Loads the Pix. Tesseract trusts DPI only from 70 to 2400; outside that range the thresholder sizes its windows as if DPI were 70.</td><td>file</td><td class="mono">00-input.png</td></tr>
+      <tr><td class="mono">2</td><td>Greyscale</td><td>Leptonica <code>pixConvertTo8</code>: one brightness value per pixel.</td><td>colour</td><td class="mono">02-grey.png + histogram</td></tr>
+      <tr><td class="mono">3</td><td>Threshold</td><td>Every pixel becomes ink or background. Default is global Otsu, one threshold per colour channel.</td><td>colour / grey</td><td class="mono">03-binary.png, threshold map, replica match %</td></tr>
+      <tr><td class="mono">4</td><td>Blobs</td><td>Connected components: each patch of touching ink pixels is a blob.</td><td>binary</td><td class="mono">blob box overlay</td></tr>
+      <tr><td class="mono">5</td><td>Blocks</td><td>Page layout sorts regions into text, image, line and noise. Only text blocks go on.</td><td>binary</td><td class="mono">block overlay + types</td></tr>
+      <tr><td class="mono">6</td><td>Paragraphs</td><td>Groups lines by indentation and spacing.</td><td>binary</td><td class="mono">paragraph overlay</td></tr>
+      <tr><td class="mono">7</td><td>Text lines</td><td>Chains blobs along a shared baseline. A line box much taller than the rest usually means two rows merged.</td><td>binary</td><td class="mono">line overlay, baseline slope °</td></tr>
+      <tr><td class="mono">8</td><td>Words + symbols</td><td>Splits lines into words by gap size, and words into symbols.</td><td>binary</td><td class="mono">word / symbol overlay</td></tr>
+      <tr><td class="mono">9</td><td>LSTM recognition</td><td>Cuts each line from the <b>original</b> image, scales it to the network's height and reads left to right. Word dictionaries (DAWGs) shape the beam search.</td><td><b>original</b></td><td class="mono">line crops, per-symbol choices</td></tr>
+      <tr><td class="mono">10</td><td>Page output</td><td>Text in reading order plus mean confidence. <code>NIDParser</code> pulls fields from it.</td><td>—</td><td class="mono">text, fields</td></tr>
+      <tr><td class="mono">11</td><td>NID field re-read</td><td>Our step: re-read each row on its own crop and keep the best reading.</td><td>original</td><td class="mono">field-*-psm7.png crops</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout"><p><b>The one rule to remember:</b> a row that the layout step (4–8) drops never reaches the LSTM, and model training can't bring it back. Fix missing rows with preprocessing, crop, rotation or PSM. Train only for misread characters.</p></div>
+</section>
+
+<section id="tess-view">
+  <h3>Layout viewer</h3>
+  <p>This viewer feeds any preprocessing output from Part 1 into a replica of Tesseract's global Otsu (the same formula as <code>tesseract_otsu()</code>) and finds connected components. Compare the raw input with 04: on the raw input, the shadow and emblem turn into ink blobs.</p>
+
+  <div class="viewer" id="tessViewer">
+    <div class="viewer-head"><span class="t">Otsu → blobs → lines · in-browser replica</span><span class="tag">synthetic sample · not a real NID</span></div>
+    <div class="tess-controls">
+      <label>Feed</label>
+      <div class="seg" id="srcSeg" role="group" aria-label="Image fed to Tesseract"></div>
+      <label>Show</label>
+      <div class="seg" id="layerSeg" role="group" aria-label="Layer"></div>
+    </div>
+    <div class="tess-grid">
+      <div class="stage"><canvas id="tessCanvas" width="960" height="380" aria-label="Selected Tesseract layer"></canvas>
+        <p class="note" id="layerNote"></p></div>
+      <div class="tess-side">
+        <h5>Greyscale histogram</h5>
+        <div class="hist" id="hist"></div>
+        <h5 style="margin-top:14px">Otsu per channel</h5>
+        <div class="tablewrap" style="margin:4px 0 14px"><table id="otsuTable"><thead><tr><th>Channel</th><th class="num">T</th><th>Ink side</th></tr></thead><tbody></tbody></table></div>
+        <h5>Layout</h5>
+        <dl class="kv" id="layoutKv"></dl>
+      </div>
+    </div>
+  </div>
+  <p class="note">Line grouping here is simplified: blobs are clustered by vertical centre. Real Tesseract fits a baseline per line and also runs block and paragraph detection first.</p>
+</section>
+
+<section id="threshold">
+  <h3>Thresholding methods</h3>
+  <p>Set <code>thresholding_method</code> in the dashboard. The window sizes depend on DPI. When the DPI is missing or outside 70–2400, Tesseract uses 70, so the windows get very small. <code>normalize_threshold()</code> checks each value against these limits.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Method</th><th>id</th><th>How the threshold is chosen</th><th>Parameters (default)</th><th>LSTM reads</th></tr></thead>
+    <tbody>
+      <tr><td>Otsu</td><td class="mono">0</td><td>One global value per channel, the one that best separates the histogram. If under 25% of pixels are ≤ T, the dark side is ink.</td><td class="mono">—</td><td>original</td></tr>
+      <tr><td>Adaptive Otsu</td><td class="mono">1</td><td>Otsu per tile, with the thresholds smoothed into a map</td><td class="mono">tile_size 0.33 × dpi (≥ 16 px)<br>smooth_kernel_size 0.0<br>score_fraction 0.1</td><td>original</td></tr>
+      <tr><td>Sauvola</td><td class="mono">2</td><td>Local mean and deviation in a window: T = m·(1 + k·(s/128 − 1))</td><td class="mono">window_size 0.33 × dpi (≥ 7 px)<br>kfactor 0.34</td><td>original</td></tr>
+      <tr><td>Manual</td><td class="mono">—</td><td>Our option: pixel ≤ value is ink. The image is binarized before Tesseract sees it.</td><td class="mono">value 128</td><td><b>binary</b></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>With <b>manual</b>, the LSTM reads the binary image too. That is the only method where a bad threshold also hurts recognition. With the other three, a bad threshold only hurts layout.</p>
+</section>
+
+<section id="layout">
+  <h3>Layout hierarchy and PSM</h3>
+  <p>Layout builds a tree: page → block → paragraph → line → word → symbol. PSM (page segmentation mode) sets how much of that tree Tesseract searches for and how much it assumes. Only PSM 1, 2, 3, 4, 11 and 12 run automatic column finding, so only those modes write Tesseract's own <code>PageSegInput</code> / <code>NoLines</code> / <code>NoImages</code> debug images.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th class="num">PSM</th><th>Assumes</th><th>Where we use it</th></tr></thead>
+    <tbody>
+      <tr><td class="num mono">0</td><td>Orientation and script detection only</td><td>Auto rotation. Rotate if confidence ≥ 2.0, otherwise try 0/90/180/270.</td></tr>
+      <tr><td class="num mono">3</td><td>Fully automatic layout</td><td>Sweep candidate. Can split the photo and the text into odd blocks.</td></tr>
+      <tr><td class="num mono">4</td><td>One column of text in mixed sizes</td><td>Sweep candidate</td></tr>
+      <tr><td class="num mono"><b>6</b></td><td>One uniform block</td><td><b>Page default.</b> The whole card is one block, and lines are still found.</td></tr>
+      <tr><td class="num mono">7</td><td>A single text line</td><td>Field re-read, first attempt</td></tr>
+      <tr><td class="num mono">11</td><td>Sparse text, no order</td><td>Sweep candidate</td></tr>
+      <tr><td class="num mono">13</td><td>Raw line, no layout heuristics</td><td>Field re-read retry</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="lstm">
+  <h3>LSTM line recognition</h3>
+  <p>With <code>--oem 1</code>, each line crop is scaled to a fixed height and read as a sequence. The model never cuts the line into characters. At every thin vertical slice it outputs a probability for each character in the model's character set (the unicharset), plus a <i>blank</i>. CTC decoding then merges repeated characters and drops the blanks. This is why joined Bengali letters, where the matra links a whole word into one blob, are read correctly.</p>
+  <div class="scroll" style="overflow-x:auto">
+  <div class="ctc" role="img" aria-label="CTC decoding: per-step outputs R R blank A A blank H blank I I M collapse to RAHIM">
+    <span class="h">Time step</span>
+    <span class="c mono muted" style="background:transparent">t1</span><span class="c mono muted" style="background:transparent">t2</span><span class="c mono muted" style="background:transparent">t3</span><span class="c mono muted" style="background:transparent">t4</span><span class="c mono muted" style="background:transparent">t5</span><span class="c mono muted" style="background:transparent">t6</span><span class="c mono muted" style="background:transparent">t7</span><span class="c mono muted" style="background:transparent">t8</span><span class="c mono muted" style="background:transparent">t9</span><span class="c mono muted" style="background:transparent">t10</span><span class="c mono muted" style="background:transparent">t11</span>
+    <span class="h">Best output</span>
+    <span class="c keep">R</span><span class="c">R</span><span class="c blank">∅</span><span class="c keep">A</span><span class="c">A</span><span class="c blank">∅</span><span class="c keep">H</span><span class="c blank">∅</span><span class="c keep">I</span><span class="c">I</span><span class="c keep">M</span>
+    <span class="h">Collapsed</span>
+    <span class="out">RAHIM</span>
+  </div>
+  </div>
+  <p class="note">Green = kept. Grey = a repeat that gets merged. Dashed ∅ = blank, which gets dropped.</p>
+  <p>A bidirectional LSTM reads the line forwards and backwards, so each character is judged with both neighbours in view. The beam search keeps the top few candidate readings and scores them with the word dictionaries (DAWGs) inside the <code>.traineddata</code> file. That helps with ordinary words and can <b>hurt names and ID numbers</b>, which is why the NID number row uses a digit-only whitelist. With <code>-l ben+eng</code>, both models run, and the better reading wins per word. Confidence is 0–100 per word. Treat it as a signal, not a guarantee.</p>
+</section>
+
+<section id="fields">
+  <h3>NID field re-read</h3>
+  <p>A single page pass mixes scripts and sometimes drops a row. <code>refine_nid_fields()</code> uses what the page pass found, then reads each NID row again on its own crop with one language.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1040 200" role="img" aria-label="Field re-read: locate rows by label, fill missing rows by position, crop the value, read with PSM 7 in one script; if confidence times script share is at least 0.75 keep it, otherwise retry with PSM 13 and no border; best candidate wins.">
+      <defs>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+        <marker id="a3h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah hot" d="M0,0 L10,5 L0,10 z"/></marker>
+      </defs>
+      <rect class="box" x="10" y="30" width="150" height="60" rx="5"/>
+      <text x="85" y="54" text-anchor="middle">Locate rows</text><text class="sub" x="85" y="72" text-anchor="middle">label + misread aliases</text>
+      <line class="edge" x1="160" y1="60" x2="183" y2="60" marker-end="url(#a3)"/>
+      <rect class="box" x="185" y="30" width="150" height="60" rx="5"/>
+      <text x="260" y="54" text-anchor="middle">Fill gaps</text><text class="sub" x="260" y="72" text-anchor="middle">interpolate by position</text>
+      <line class="edge" x1="335" y1="60" x2="358" y2="60" marker-end="url(#a3)"/>
+      <rect class="box" x="360" y="30" width="150" height="60" rx="5"/>
+      <text x="435" y="54" text-anchor="middle">Crop value</text><text class="sub" x="435" y="72" text-anchor="middle">↑64 px · 300 dpi · 12 px pad</text>
+      <line class="edge" x1="510" y1="60" x2="533" y2="60" marker-end="url(#a3)"/>
+      <rect class="box" x="535" y="30" width="130" height="60" rx="5"/>
+      <text x="600" y="54" text-anchor="middle">Read PSM 7</text><text class="sub" x="600" y="72" text-anchor="middle">ben | eng | digits</text>
+      <line class="edge" x1="665" y1="60" x2="688" y2="60" marker-end="url(#a3)"/>
+      <path class="box warm" d="M760 20 L832 60 L760 100 L688 60 Z"/>
+      <text x="760" y="56" text-anchor="middle" style="font-size:11.5px">conf × script</text><text x="760" y="71" text-anchor="middle" style="font-size:11.5px">≥ 0.75?</text>
+      <line class="edge hot" x1="832" y1="60" x2="878" y2="60" marker-end="url(#a3h)"/>
+      <text class="lab hot" x="855" y="52" text-anchor="middle">yes</text>
+      <rect class="box hot" x="880" y="30" width="150" height="60" rx="5"/>
+      <text x="955" y="54" text-anchor="middle">Keep best</text><text class="sub" x="955" y="72" text-anchor="middle">page vs re-reads</text>
+      <line class="edge" x1="760" y1="100" x2="760" y2="133" marker-end="url(#a3)"/>
+      <text class="lab" x="768" y="121">no</text>
+      <rect class="box" x="685" y="135" width="150" height="50" rx="5"/>
+      <text x="760" y="156" text-anchor="middle">Retry PSM 13</text><text class="sub" x="760" y="173" text-anchor="middle">raw line · no border</text>
+      <path class="edge" d="M835 160 H955 V92" marker-end="url(#a3)"/>
+      <text class="lab" x="895" y="153" text-anchor="middle">candidate</text>
+    </svg>
+    </div>
+    <figcaption>Rows in card order: <span class="bn">নাম</span> → Name → <span class="bn">পিতা</span> → <span class="bn">মাতা</span> → Date of Birth → ID NO. Known misreads are matched too, such as <span class="bn">লাম</span> for <span class="bn">নাম</span>, "narne" for Name, and "1d" for ID. A row missing between two found labels is placed by position, so a row the page pass dropped can still be read.</figcaption>
+  </figure>
+</section>
+</main>
+</div>
+
+<script>
+(() => {
+const W = 960, H = 380, N = W * H;
+
+/* ---------- synthetic NID-style sample ---------- */
+function drawSample(ctx) {
+  ctx.fillStyle = "#EDF1E4"; ctx.fillRect(0, 0, W, H);
+  // guilloche watermark
+  ctx.lineWidth = 1;
+  for (let k = 0; k < 26; k++) {
+    ctx.strokeStyle = k % 2 ? "rgba(120,170,120,0.28)" : "rgba(210,140,170,0.22)";
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 4) {
+      const y = 12 + k * 14.5 + Math.sin(x / 38 + k * 0.7) * 9 + Math.sin(x / 11 + k) * 2;
+      x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  // emblem
+  const ex = 640, ey = 200;
+  const g = ctx.createRadialGradient(ex, ey, 10, ex, ey, 165);
+  g.addColorStop(0, "rgba(240,170,40,0.55)"); g.addColorStop(1, "rgba(240,170,40,0.12)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ex, ey, 165, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "rgba(225,120,30,0.55)"; ctx.lineWidth = 3;
+  for (const r of [60, 100, 140]) { ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.fillStyle = "rgba(215,90,40,0.5)";
+  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; ctx.beginPath(); ctx.arc(ex + Math.cos(a) * 120, ey + Math.sin(a) * 120, 7, 0, Math.PI * 2); ctx.fill(); }
+  // text
+  const rows = [
+    ["bn", "নাম:  মোঃ রহিম উদ্দিন"],
+    ["en", "Name:  MD. RAHIM UDDIN"],
+    ["bn", "পিতা:  আব্দুল করিম"],
+    ["bn", "মাতা:  রহিমা খাতুন"],
+    ["en", "Date of Birth  01 Jan 1990"],
+    ["en", "ID NO:  123 456 7890"],
+  ];
+  ctx.fillStyle = "#1c1a1a"; ctx.textBaseline = "alphabetic";
+  rows.forEach(([s, t], i) => {
+    ctx.font = s === "bn" ? '600 30px "Noto Sans Bengali", sans-serif' : '600 28px "IBM Plex Sans", sans-serif';
+    ctx.fillText(t, 48, 58 + i * 58);
+  });
+  // uneven lighting: shadow from lower-left, glare top-middle
+  const sh = ctx.createLinearGradient(0, H, W * 0.7, 0);
+  sh.addColorStop(0, "rgba(40,30,20,0.42)"); sh.addColorStop(0.55, "rgba(40,30,20,0.08)"); sh.addColorStop(1, "rgba(40,30,20,0)");
+  ctx.fillStyle = sh; ctx.fillRect(0, 0, W, H);
+  const gl = ctx.createRadialGradient(330, 70, 5, 330, 70, 150);
+  gl.addColorStop(0, "rgba(255,255,250,0.62)"); gl.addColorStop(1, "rgba(255,255,250,0)");
+  ctx.fillStyle = gl; ctx.fillRect(0, 0, W, H);
+}
+
+/* ---------- numeric helpers mirroring nid_pipeline.py ---------- */
+const hist = a => { const h = new Float64Array(256); for (let i = 0; i < a.length; i++) h[a[i]]++; return h; };
+function percentile(a, q) { // numpy linear interpolation
+  const h = hist(a), idx = q / 100 * (a.length - 1), lo = Math.floor(idx), frac = idx - lo;
+  const at = k => { let c = 0; for (let v = 0; v < 256; v++) { c += h[v]; if (c > k) return v; } return 255; };
+  const vlo = at(lo); return frac ? vlo + (at(lo + 1) - vlo) * frac : vlo;
+}
+function autocontrast(a, cutoff) { // PIL ImageOps.autocontrast
+  const h = hist(a), n = a.length;
+  let cut = Math.floor(n * cutoff / 100);
+  for (let lo = 0; lo < 256; lo++) { if (cut > h[lo]) { cut -= h[lo]; h[lo] = 0; } else { h[lo] -= cut; cut = 0; } if (cut <= 0) break; }
+  cut = Math.floor(n * cutoff / 100);
+  for (let hi = 255; hi >= 0; hi--) { if (cut > h[hi]) { cut -= h[hi]; h[hi] = 0; } else { h[hi] -= cut; cut = 0; } if (cut <= 0) break; }
+  let lo = 0; while (lo < 256 && !h[lo]) lo++;
+  let hi = 255; while (hi >= 0 && !h[hi]) hi--;
+  const out = new Uint8ClampedArray(a.length);
+  if (hi <= lo) { out.set(a); return out; }
+  const scale = 255 / (hi - lo), off = -lo * scale, lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) { const v = Math.floor(i * scale + off); lut[i] = v < 0 ? 0 : v > 255 ? 255 : v; }
+  for (let i = 0; i < a.length; i++) out[i] = lut[a[i]];
+  return out;
+}
+function gaussian(a, k) { // cv2.GaussianBlur, sigma 0, BORDER_REFLECT_101
+  const s = 0.3 * ((k - 1) * 0.5 - 1) + 0.8, r = k >> 1, wts = [];
+  let sum = 0; for (let i = -r; i <= r; i++) { const v = Math.exp(-(i * i) / (2 * s * s)); wts.push(v); sum += v; }
+  for (let i = 0; i < wts.length; i++) wts[i] /= sum;
+  const refl = (i, n) => i < 0 ? -i : i >= n ? 2 * n - 2 - i : i;
+  const tmp = new Float32Array(N), out = new Uint8ClampedArray(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let v = 0; for (let j = -r; j <= r; j++) v += a[y * W + refl(x + j, W)] * wts[j + r]; tmp[y * W + x] = v; }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let v = 0; for (let j = -r; j <= r; j++) v += tmp[refl(y + j, H) * W + x] * wts[j + r]; out[y * W + x] = Math.round(v); }
+  return out;
+}
+const toRGBA = (grey) => { const d = new Uint8ClampedArray(N * 4); for (let i = 0; i < N; i++) { d[i*4] = d[i*4+1] = d[i*4+2] = grey[i]; d[i*4+3] = 255; } return d; };
+const lumaOf = (rgba) => { const g = new Uint8ClampedArray(N); for (let i = 0; i < N; i++) g[i] = Math.round(rgba[i*4] * 0.3 + rgba[i*4+1] * 0.5 + rgba[i*4+2] * 0.2); return g; };
+const inkShare = g => { let c = 0; for (let i = 0; i < g.length; i++) if (g[i] < 128) c++; return c / g.length; };
+function stats(g) { let mn = 255, mx = 0; for (let i = 0; i < g.length; i++) { if (g[i] < mn) mn = g[i]; if (g[i] > mx) mx = g[i]; }
+  return { min: mn, p05: Math.floor(percentile(g, 5)), median: Math.floor(percentile(g, 50)), p95: Math.floor(percentile(g, 95)), max: mx }; }
+
+/* ---------- run the pipeline ---------- */
+function runPipeline(inputRGBA) {
+  const green = new Uint8ClampedArray(N); for (let i = 0; i < N; i++) green[i] = inputRGBA[i*4+1];
+  const radius = Math.max(9, Math.floor(Math.min(W, H) / 28)), kernel = Math.max(17, radius | 1);
+  const bg = gaussian(green, kernel);
+  const ref = Math.max(1, percentile(bg, 88));
+  const norm = new Uint8ClampedArray(N);
+  for (let i = 0; i < N; i++) { const v = green[i] / Math.max(bg[i], 1) * ref; norm[i] = Math.floor(v < 0 ? 0 : v > 255 ? 255 : v); }
+  const contrast = autocontrast(norm, 0.5);
+  const t = Math.max(20, Math.min(245, Math.floor(percentile(contrast, 38))));
+  let m = new Uint8Array(N); for (let i = 0; i < N; i++) m[i] = contrast[i] <= t ? 1 : 0;
+  const er = new Uint8Array(N), op = new Uint8Array(N); // open 2x2
+  for (let y = 1; y < H; y++) for (let x = 1; x < W; x++) { const i = y*W+x; er[i] = m[i] & m[i-1] & m[i-W] & m[i-W-1]; }
+  for (let y = 0; y < H - 1; y++) for (let x = 0; x < W - 1; x++) { const i = y*W+x; op[i] = er[i] | er[i+1] | er[i+W] | er[i+W+1]; }
+  const mask = new Uint8ClampedArray(N); for (let i = 0; i < N; i++) mask[i] = op[i] ? 0 : 255;
+  const masked = new Uint8ClampedArray(N);
+  for (let i = 0; i < N; i++) masked[i] = Math.floor(mask[i] < 128 ? contrast[i] * 0.78 : Math.min(255, contrast[i] * 1.06 + 6));
+  const v1 = autocontrast(green, 1);
+  return { green, bg, norm, contrast, mask, masked, v1, meta: { radius, kernel, ref, t } };
+}
+
+/* ---------- Tesseract Otsu replica (tesseract_otsu) ---------- */
+function otsuStats(h) {
+  let total = 0, muT = 0; for (let i = 0; i < 256; i++) { total += h[i]; muT += i * h[i]; }
+  let bestT = -1, bestO = 0, bestS = 0, o0 = 0, mu = 0;
+  for (let t = 0; t < 255; t++) {
+    o0 += h[t]; mu += t * h[t];
+    if (o0 === 0) continue;
+    const o1 = total - o0; if (o1 === 0) break;
+    const s = ((muT - mu) / o1 - mu / o0) ** 2 * o0 * o1;
+    if (bestT < 0 || s > bestS) { bestS = s; bestT = t; bestO = o0; }
+  }
+  return [bestT, total, bestO];
+}
+function tessOtsu(rgba) {
+  const names = ["red", "green", "blue", "alpha"], th = [-1,-1,-1,-1], hv = [-1,-1,-1,-1];
+  let anyGood = false, bestD = 0, bestV = 1, bestI = 0;
+  for (let c = 0; c < 4; c++) {
+    const h = new Float64Array(256);
+    for (let i = 0; i < N; i++) h[c === 3 ? 0 : rgba[i*4+c]]++; // no alpha in source: Tesseract sees 0
+    const [t, total, o0] = otsuStats(h);
+    if (o0 === 0 || o0 === total) continue;
+    const hi = o0 < total * 0.5 ? 1 : 0; th[c] = t;
+    if (o0 > total * 0.75) { anyGood = true; hv[c] = 0; }
+    else if (o0 < total * 0.25) { anyGood = true; hv[c] = 1; }
+    else { const d = hi ? total - o0 : o0; if (d > bestD) { bestD = d; bestV = hi; bestI = c; } }
+  }
+  if (!anyGood) hv[bestI] = bestV;
+  const ink = new Uint8Array(N);
+  for (let c = 0; c < 4; c++) if (hv[c] >= 0) for (let i = 0; i < N; i++) if (((c === 3 ? 0 : rgba[i*4+c]) > th[c]) === (hv[c] === 0)) ink[i] = 1;
+  const rows = names.map((n, c) => ({ channel: n, t: th[c], ink: hv[c] === 1 ? `≤ ${th[c]}` : hv[c] === 0 ? `> ${th[c]}` : "ignored" }));
+  return { rows, ink };
+}
+function components(ink) {
+  const lab = new Int32Array(N), stack = new Int32Array(N), boxes = [];
+  let id = 0;
+  for (let s = 0; s < N; s++) {
+    if (!ink[s] || lab[s]) continue;
+    id++; let sp = 0; stack[sp++] = s; lab[s] = id;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0, area = 0;
+    while (sp) {
+      const p = stack[--sp], x = p % W, y = (p / W) | 0; area++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx; if (ink[q] && !lab[q]) { lab[q] = id; stack[sp++] = q; }
+      }
+    }
+    if (area >= 4) boxes.push({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, area });
+  }
+  return boxes;
+}
+function lines(boxes) {
+  const cand = boxes.filter(b => b.h >= 6 && b.h <= H * 0.3 && b.w <= W * 0.5).sort((a, b) => (a.y + a.h / 2) - (b.y + b.h / 2));
+  const out = [];
+  for (const b of cand) {
+    const cy = b.y + b.h / 2;
+    const l = out.find(l => Math.abs(cy - (l.y + l.h / 2)) < 0.5 * Math.max(l.h, b.h));
+    if (l) { const x1 = Math.max(l.x + l.w, b.x + b.w), y1 = Math.max(l.y + l.h, b.y + b.h); l.x = Math.min(l.x, b.x); l.y = Math.min(l.y, b.y); l.w = x1 - l.x; l.h = y1 - l.y; l.n++; }
+    else out.push({ x: b.x, y: b.y, w: b.w, h: b.h, n: 1 });
+  }
+  return out.filter(l => l.n >= 2);
+}
+const median = arr => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m-1] + s[m]) / 2; };
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+const put = (canvas, rgba) => canvas.getContext("2d").putImageData(new ImageData(rgba, W, H), 0, 0);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+async function main() {
+  try { await Promise.all([document.fonts.load('600 30px "Noto Sans Bengali"', "নাম"), document.fonts.load('600 28px "IBM Plex Sans"')]); } catch (e) {}
+  const scratch = document.createElement("canvas"); scratch.width = W; scratch.height = H;
+  const sctx = scratch.getContext("2d", { willReadFrequently: true });
+  drawSample(sctx);
+  const input = sctx.getImageData(0, 0, W, H).data;
+  const P = runPipeline(input);
+
+  const pre = [
+    { f: "00-input.png", title: "Input image", img: () => input, grey: () => lumaOf(input),
+      explain: "The image after EXIF orientation is fixed. It has a shadow from the lower left, glare at the top and an emblem behind the text.",
+      formula: "ImageOps.exif_transpose(img).convert(\"RGB\")" },
+    { f: "01-green-channel.png", title: "Green channel", g: P.green,
+      explain: "The emblem is bright in green, so it moves toward the card tone. The shadow is still there, because every channel is darker in shadow.",
+      formula: "green = image.getchannel(\"G\")" },
+    { f: "02-background-estimate.png", title: "Background estimate", g: P.bg,
+      explain: "The blur removes the text strokes. What is left is the lighting and the emblem, and step 03 divides it out.",
+      formula: `radius = max(9, min(${W},${H}) // 28) = ${P.meta.radius}\nkernel = max(17, radius | 1) = ${P.meta.kernel}   → cv2.GaussianBlur(green, (${P.meta.kernel},${P.meta.kernel}), 0)` },
+    { f: "03-background-normalized.png", title: "Background normalized", g: P.norm,
+      explain: "Division cancels the shadow and the glare, because the paper and the ink under them change by the same factor.",
+      formula: `out = clip(green / max(bg, 1) × p88(bg), 0, 255)   p88(bg) = ${P.meta.ref.toFixed(1)}` },
+    { f: "04-controlled-contrast.png", title: "Controlled contrast", g: P.contrast, best: true,
+      explain: "Stretches tones with 0.5% clipping at each end. This is the final OCR image for nid_ink_v2_contrast, the current best recipe.",
+      formula: "ImageOps.autocontrast(normalized, cutoff=0.5)" },
+    { f: "05-ink-mask.png", title: "Ink mask", g: P.mask,
+      explain: "Diagnostic only: shows which pixels count as likely ink. The cutoff is set so that about 38% of pixels count as ink.",
+      formula: `threshold = clamp(p38(contrast), 20, 245) = ${P.meta.t}\nmask = contrast ≤ threshold, then MORPH_OPEN 2×2` },
+    { f: "06-nid-ink-v2-masked.png", title: "Masked text-ink image", g: P.masked,
+      explain: "Darkens ink and lightens everything else, and keeps the image greyscale. This is the final image for nid_ink_v2.",
+      formula: "ink:  px × 0.78\nelse: px × 1.06 + 6" },
+    { div: "v1 for comparison" },
+    { f: "02-nid-ink-v1.png", title: "NID ink v1", g: P.v1,
+      explain: "Green channel plus 1% autocontrast, with no background division. Compare it with 04: the shadow is still visible here.",
+      formula: "ImageOps.autocontrast(green, cutoff=1)" },
+  ];
+  const preCanvas = $("preCanvas"), preSteps = $("preSteps");
+  const imgOf = s => s.img ? s.img() : toRGBA(s.g), greyOf = s => s.grey ? s.grey() : s.g;
+  function showPre(i) {
+    const s = pre[i];
+    put(preCanvas, imgOf(s));
+    $("preTitle").textContent = s.title + (s.best ? " · current best" : "");
+    $("preFile").textContent = s.f;
+    $("preExplain").textContent = s.explain;
+    $("preFormula").textContent = s.formula;
+    const g = greyOf(s), st = stats(g);
+    $("preMetrics").innerHTML = Object.entries(st).map(([k, v]) => `<span>${k} <b>${v}</b></span>`).join("") + `<span>ink share &lt;128 <b>${(inkShare(g) * 100).toFixed(1)}%</b></span>`;
+    preSteps.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.i === i)));
+  }
+  pre.forEach((s, i) => {
+    if (s.div) { const d = document.createElement("div"); d.className = "div"; d.textContent = s.div; preSteps.append(d); return; }
+    const b = document.createElement("button"); b.type = "button"; b.dataset.i = i; b.textContent = s.f.replace(".png", "");
+    b.addEventListener("click", () => showPre(i)); preSteps.append(b);
+  });
+  showPre(4);
+
+  /* Tesseract viewer */
+  const sources = [
+    { id: "raw", label: "00 input", rgba: input },
+    { id: "v1", label: "02 v1", rgba: toRGBA(P.v1) },
+    { id: "c", label: "04 contrast", rgba: toRGBA(P.contrast) },
+    { id: "m", label: "06 masked", rgba: toRGBA(P.masked) },
+  ];
+  const layers = [
+    { id: "grey", label: "Grey", note: "Step 2: greyscale, one brightness value per pixel." },
+    { id: "binary", label: "Binary", note: "Step 3: Otsu binary. This is all that layout analysis sees." },
+    { id: "blobs", label: "Blobs", note: "Step 4: connected components, 8-connected. Each box is one blob. Big blobs on the raw input are shadow or emblem, not text." },
+    { id: "lines", label: "Lines", note: "Step 7 (simplified): blobs chained by vertical centre. A tall box means rows merged; a missing box means a row the LSTM will never read." },
+  ];
+  const cache = {};
+  let src = "c", layer = "lines";
+  const analyse = s => cache[s.id] || (cache[s.id] = (() => {
+    const grey = lumaOf(s.rgba), ot = tessOtsu(s.rgba), boxes = components(ot.ink);
+    return { grey, ot, boxes, lines: lines(boxes) };
+  })());
+  function seg(el, items, get, set) {
+    items.forEach(it => { const b = document.createElement("button"); b.type = "button"; b.textContent = it.label; b.dataset.id = it.id;
+      b.addEventListener("click", () => { set(it.id); render(); }); el.append(b); });
+    return () => el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.id === get())));
+  }
+  const syncSrc = seg($("srcSeg"), sources, () => src, v => src = v);
+  const syncLayer = seg($("layerSeg"), layers, () => layer, v => layer = v);
+  const tc = $("tessCanvas"), tctx = tc.getContext("2d");
+
+  function histogram(grey, thr) {
+    const h = hist(grey), vw = 280, vh = 120, pl = 6, pr = 6, pt = 18, pb = 20, iw = vw - pl - pr, ih = vh - pt - pb;
+    const mx = Math.sqrt(Math.max(...h)) || 1;
+    let d = `M${pl} ${pt + ih}`;
+    for (let i = 0; i < 256; i++) { const x = pl + i / 255 * iw, y = pt + ih - Math.sqrt(h[i]) / mx * ih; d += ` L${x.toFixed(1)} ${y.toFixed(1)}`; }
+    d += ` L${pl + iw} ${pt + ih} Z`;
+    const ticks = [0, 64, 128, 192, 255].map(v => { const x = pl + v / 255 * iw; return `<line class="axis" x1="${x}" x2="${x}" y1="${pt + ih}" y2="${pt + ih + 4}"/><text x="${x}" y="${vh - 4}" text-anchor="${v === 0 ? "start" : v === 255 ? "end" : "middle"}">${v}</text>`; }).join("");
+    const tx = pl + thr / 255 * iw;
+    const tl = thr >= 0 ? `<line class="thr" x1="${tx}" x2="${tx}" y1="${pt - 4}" y2="${pt + ih}"/><text class="thr-l" x="${tx + (thr > 200 ? -4 : 4)}" y="${pt - 6}" text-anchor="${thr > 200 ? "end" : "start"}">T = ${thr}</text>` : "";
+    $("hist").innerHTML = `<svg viewBox="0 0 ${vw} ${vh}" role="img" aria-label="Greyscale histogram, square-root scale, Otsu threshold ${thr}"><path class="bars" d="${d}"/><line class="axis" x1="${pl}" x2="${pl + iw}" y1="${pt + ih}" y2="${pt + ih}"/>${ticks}${tl}</svg>`;
+  }
+
+  function render() {
+    syncSrc(); syncLayer();
+    const s = sources.find(x => x.id === src), A = analyse(s);
+    if (layer === "grey") put(tc, toRGBA(A.grey));
+    else {
+      const bin = new Uint8ClampedArray(N); for (let i = 0; i < N; i++) bin[i] = A.ot.ink[i] ? 0 : 255;
+      put(tc, toRGBA(bin));
+      if (layer === "blobs") {
+        tctx.lineWidth = 1.5; tctx.strokeStyle = "rgba(47,95,179,0.9)";
+        A.boxes.forEach(b => tctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h));
+      } else if (layer === "lines") {
+        tctx.lineWidth = 2.5; tctx.strokeStyle = "rgba(29,115,73,0.95)"; tctx.fillStyle = "rgba(29,115,73,0.10)";
+        A.lines.forEach(l => { tctx.fillRect(l.x - 3, l.y - 3, l.w + 6, l.h + 6); tctx.strokeRect(l.x - 3, l.y - 3, l.w + 6, l.h + 6); });
+      }
+    }
+    $("layerNote").textContent = layers.find(l => l.id === layer).note;
+    const used = A.ot.rows.filter(r => r.ink !== "ignored");
+    histogram(A.grey, used.length ? used[0].t : -1);
+    $("otsuTable").querySelector("tbody").innerHTML = A.ot.rows.map(r => `<tr><td>${r.channel}</td><td class="num mono">${r.t < 0 ? "—" : r.t}</td><td class="mono">${r.ink}</td></tr>`).join("");
+    const inkPct = (A.ot.ink.reduce((a, b) => a + b, 0) / N * 100).toFixed(1);
+    const heights = A.lines.map(l => l.h), big = A.boxes.filter(b => b.w > 120 || b.h > 80).length;
+    $("layoutKv").innerHTML = [
+      ["Ink share", inkPct + "%"], ["Blobs", A.boxes.length], ["Median blob height", median(A.boxes.map(b => b.h)) + " px"],
+      ["Oversized blobs", big], ["Lines found", `${A.lines.length} / 6`], ["Tallest line", (heights.length ? Math.max(...heights) : 0) + " px"],
+    ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  }
+  render();
+}
+main();
+})();
+</script>
