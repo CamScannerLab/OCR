@@ -222,7 +222,7 @@ function badges(sample) {
 async function selectSample(id) {
   state.selected = state.samples.find((sample) => sample.id === id);
   state.annotation = null;
-  ocrInputSelect.value = isUpload(state.selected) || !state.selected?.annotation ? "as_is" : "filter";
+  ocrInputSelect.value = "filter";
   labelCardId.value = isUpload(state.selected) ? state.selected.upload_id : (state.selected?.id || "");
   renderList();
   await loadAnnotation();
@@ -311,7 +311,7 @@ function updateImages() {
   } else {
     filterImage.src = imageUrl(path, filterSelect.value, rotation.degrees);
   }
-  const base = asUploaded ? "OCR input" : "Filter";
+  const base = "Preview filter";
   filterHeading.textContent = maskOverlay ? base : `${base} · ${rotation.label}`;
 }
 
@@ -327,7 +327,7 @@ function previewRotation() {
   if (state.autoRotation?.key === previewKey()) {
     return { degrees: state.autoRotation.degrees, label: `auto → ${state.autoRotation.degrees}° (last OCR)` };
   }
-  return { degrees: 0, label: "auto (decided when OCR runs)" };
+  return { degrees: 0, label: "auto pending" };
 }
 
 function imageUrl(path, mode, rotation = 0) {
@@ -521,13 +521,18 @@ async function deleteUpload(sample) {
 
 async function runOcr() {
   const asUploaded = ocrInputSelect.value === "as_is";
-  const imagePath = !asUploaded && state.selected?.annotation ? cropBaseImagePath() : sourceSelect.value;
+  const preprocessed = window.currentPreprocessedInput?.() || null;
+  const imagePath = preprocessed?.path || (!asUploaded && state.selected?.annotation ? cropBaseImagePath() : sourceSelect.value);
   if (!imagePath) {
     setOcrMessage("No image is selected.");
     return;
   }
-  const mode = filterSelect.value === "mask_overlay" ? "enhance" : filterSelect.value;
-  setOcrMessage(ocrEngineSelect.value === "easyocr" ? "Running EasyOCR… first use may download/load models; later runs reuse them." : "Running OCR...");
+  const mode = preprocessed ? "original" : (filterSelect.value === "mask_overlay" ? "enhance" : filterSelect.value);
+  const inputMode = preprocessed ? "as_is" : ocrInputSelect.value;
+  const annotationPath = preprocessed ? null : (asUploaded ? null : (state.selected?.annotation || null));
+  const sourceNote = preprocessed ? ` on ${preprocessed.sourceName}` : " on filtered preview";
+  const ocrRotation = preprocessed ? "0" : ocrRotationSelect.value;
+  setOcrMessage(ocrEngineSelect.value === "easyocr" ? `Running EasyOCR${sourceNote}… first use may download/load models; later runs reuse them.` : `Running OCR${sourceNote}...`);
   runOcrButton.disabled = true;
   try {
     const response = await fetch("/api/ocr/run", {
@@ -536,27 +541,36 @@ async function runOcr() {
       body: JSON.stringify({
         engine: ocrEngineSelect.value,
         language: ocrLanguageSelect.value,
-        rotation: ocrRotationSelect.value,
+        rotation: ocrRotation,
         model: ocrModelSelect.disabled || ocrEngineSelect.value === "tesseract" ? null : ocrModelSelect.value,
         tesseract_variant: ocrEngineSelect.value === "tesseract" ? ocrModelSelect.value : null,
         psm: ocrPsmSelect.value,
         strategy: ocrStrategySelect.value,
-        input: ocrInputSelect.value,
+        input: inputMode,
         mode,
         image_path: imagePath,
-        annotation_path: asUploaded ? null : (state.selected?.annotation || null),
-        sample_id: state.selected.id,
+        annotation_path: annotationPath,
+        sample_id: state.selected?.id || null,
+        preprocessed_id: preprocessed?.preprocessId || null,
       }),
     });
+    if (!response.headers.get("content-type")?.includes("application/json")) {
+      throw new Error(`OCR route returned non-JSON (HTTP ${response.status}). Restart the dashboard.`);
+    }
     const result = await response.json();
     if (!result.ok) {
       setOcrMessage(result.error || "OCR failed.");
       return;
     }
     renderOcrResult(result);
-    if (ocrRotationSelect.value === "auto" && Number.isInteger(result.rotation)) {
+    if (!preprocessed && ocrRotationSelect.value === "auto" && Number.isInteger(result.rotation)) {
       state.autoRotation = { key: previewKey(), degrees: result.rotation };
       updateImages();
+    }
+    if (ocrEngineSelect.value === "tesseract" && window.runOcrSteps) {
+      await window.runOcrSteps({ rotation: String(result.rotation ?? ocrRotation) });
+    } else if (window.clearOcrSteps) {
+      window.clearOcrSteps(`${selectedOcrEngine()?.label || "This engine"} does not expose Tesseract OCR steps.`);
     }
   } catch (error) {
     setOcrMessage(`OCR request failed: ${error}`);

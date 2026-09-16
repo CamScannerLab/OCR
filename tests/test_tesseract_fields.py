@@ -6,6 +6,7 @@ from PIL import Image
 
 from nid_ocr_lab.dashboard.filters import apply_filter
 from nid_ocr_lab.engines.tesseract_fields import refine_nid_fields
+from nid_ocr_lab.engines.tesseract_reader import LineRead
 from nid_ocr_lab.models import OCRResult
 from nid_ocr_lab.parsers.nid_parser import NIDParser
 
@@ -32,33 +33,32 @@ PAGE_WORDS = [
 
 # (field, psm) -> (text, confidence). A missing PSM 13 entry means the retry must not happen.
 REREADS = {
-    ("field_name_bangla", 7): ("ওরেম", 0.3),  # weak first read ...
-    ("field_name_bangla", 13): ("ডনিয়েল ত্রিপুরা", 0.8),  # ... fixed by the retry
-    ("field_name_english", 7): ("Doniel Tripura", 0.8),
-    ("field_father_name_bangla", 7): ("মসাধন ত্রিপুরা 7 |", 0.8),  # border speck read as a digit
-    ("field_mother_name_bangla", 7): ("Some fig", 0.9),  # Latin junk on a Bengali row
-    ("field_mother_name_bangla", 13): ("orem", 0.9),
-    ("field_date_of_birth", 7): ("28 Way 2001", 0.8),  # page pass read it better
-    ("field_nid_number", 7): ("8263067046", 0.9),
+    ("name_bangla", 7): ("ওরেম", 0.3),  # weak first read ...
+    ("name_bangla", 13): ("ডনিয়েল ত্রিপুরা", 0.8),  # ... fixed by the retry
+    ("name_english", 7): ("Doniel Tripura", 0.8),
+    ("father_name_bangla", 7): ("মসাধন ত্রিপুরা 7 |", 0.8),  # border speck read as a digit
+    ("mother_name_bangla", 7): ("Some fig", 0.9),  # Latin junk on a Bengali row
+    ("mother_name_bangla", 13): ("orem", 0.9),
+    ("date_of_birth", 7): ("28 Way 2001", 0.8),  # page pass read it better
+    ("nid_number", 7): ("8263067046", 0.9),
 }
 
 
-class FakeEngine:
+class FakeReader:
+    """Stands in for the C API reader: crops are real files, the text is scripted per (field, psm)."""
+
+    name = "fake"
+
     def __init__(self):
         self.calls = []
 
-    def recognize(self, image_path, languages, preprocessing=None, psm=None, **kwargs):
+    def read(self, image_path, datapath, languages, psm, config=None):
+        field = Path(image_path).stem.split("-", 2)[2].rsplit("-psm", 1)[0]
         with Image.open(image_path) as crop:
             size = crop.size
-        self.calls.append({"field": preprocessing, "languages": languages, "psm": psm, "size": size, **kwargs})
-        text, confidence = REREADS.get((preprocessing, psm), ("", None))
-        return OCRResult(
-            blocks=[],
-            full_text=text,
-            engine="tesseract",
-            latency_ms=10.0,
-            metadata={"words": [{"text": text, "confidence": confidence}] if text else []},
-        )
+        self.calls.append({"field": field, "languages": languages, "psm": psm, "size": size, "config": config, "datapath": datapath})
+        text, confidence = REREADS.get((field, psm), ("", None))
+        return LineRead(text=text, confidence=confidence)
 
 
 class NIDFieldRefinementTests(unittest.TestCase):
@@ -77,8 +77,8 @@ class NIDFieldRefinementTests(unittest.TestCase):
             latency_ms=100.0,
             metadata={"words": PAGE_WORDS, "psm": 6},
         )
-        self.engine = FakeEngine()
-        self.result = refine_nid_fields(self.engine, self.image, self.page, variant="best", workdir=self.workdir)
+        self.engine = FakeReader()
+        self.result = refine_nid_fields(None, self.image, self.page, variant="best", workdir=self.workdir, reader=self.engine)
         self.fields = {field["field"]: field for field in self.result.metadata["fields"]}
 
     def test_dropped_father_row_is_interpolated_and_read_in_bengali(self):
@@ -88,25 +88,27 @@ class NIDFieldRefinementTests(unittest.TestCase):
         # between the Name row (top 51) and the মাতা row (top 111)
         self.assertGreater(father["box"]["y"], 51)
         self.assertLess(father["box"]["y"] + father["box"]["height"], 111 + 12)
-        call = next(call for call in self.engine.calls if call["field"] == "field_father_name_bangla")
-        self.assertEqual((call["languages"], call["psm"], call["variant"]), (["ben"], 7, "best"))
+        call = next(call for call in self.engine.calls if call["field"] == "father_name_bangla")
+        self.assertEqual((call["languages"], call["psm"]), (["ben"], 7))
+        self.assertTrue(str(call["datapath"]).endswith("tessdata/best"))
 
     def test_each_row_is_locked_to_one_script(self):
         languages = {call["field"]: call["languages"] for call in self.engine.calls}
-        self.assertEqual(languages["field_name_bangla"], ["ben"])
-        self.assertEqual(languages["field_name_english"], ["eng"])
+        self.assertEqual(languages["name_bangla"], ["ben"])
+        self.assertEqual(languages["name_english"], ["eng"])
         # crops are upscaled to at least 64 px before the white border
         self.assertTrue(all(call["size"][1] >= 64 for call in self.engine.calls))
 
     def test_weak_read_is_retried_once_without_border(self):
-        name_calls = [call for call in self.engine.calls if call["field"] == "field_name_bangla"]
+        name_calls = [call for call in self.engine.calls if call["field"] == "name_bangla"]
         self.assertEqual([call["psm"] for call in name_calls], [7, 13])
         self.assertEqual(name_calls[0]["size"][1] - name_calls[1]["size"][1], 24)  # 12 px border on PSM 7 only
         self.assertEqual(self.fields["name_bangla"]["text"], "ডনিয়েল ত্রিপুরা")
         self.assertEqual(self.fields["name_bangla"]["source"], "reread")
         # retries: name_bangla (weak) and mother (wrong script); every other row stops after one read
         self.assertEqual(self.result.metadata["field_calls"], 8)
-        self.assertAlmostEqual(self.result.latency_ms, 180.0)
+        self.assertEqual(self.result.metadata["field_reader"], "fake")
+        self.assertGreaterEqual(self.result.latency_ms, 100.0)  # page latency plus the re-reads
 
     def test_wrong_script_reread_keeps_page_value(self):
         mother = self.fields["mother_name_bangla"]
@@ -119,9 +121,9 @@ class NIDFieldRefinementTests(unittest.TestCase):
         self.assertEqual((dob["source"], dob["text"]), ("page", "28 May 2001"))
 
     def test_nid_row_uses_digit_whitelist(self):
-        call = next(call for call in self.engine.calls if call["field"] == "field_nid_number")
+        call = next(call for call in self.engine.calls if call["field"] == "nid_number")
         self.assertEqual(call["config"], {"tessedit_char_whitelist": "0123456789"})
-        others = [call["config"] for call in self.engine.calls if call["field"] != "field_nid_number"]
+        others = [call["config"] for call in self.engine.calls if call["field"] != "nid_number"]
         self.assertTrue(all(config is None for config in others))
 
     def test_refined_text_parses_into_fields(self):
@@ -143,14 +145,14 @@ class NIDFieldRefinementTests(unittest.TestCase):
         may = next(index for index, item in enumerate(words) if item["text"] == "May")
         words[may] = word("May", 110, 141, 31, line=4, conf=0.95)
         page = OCRResult(blocks=[], full_text="", engine="tesseract", metadata={"words": words})
-        result = refine_nid_fields(FakeEngine(), self.image, page, variant="best", workdir=self.workdir)
+        result = refine_nid_fields(None, self.image, page, variant="best", workdir=self.workdir, reader=FakeReader())
         dob = next(field for field in result.metadata["fields"] if field["field"] == "date_of_birth")
         self.assertEqual(dob["text"], "28 May 2001")
 
     def test_unmatched_page_lines_are_kept(self):
         words = [word("গণপ্রজাতন্ত্রী", 40, 2, 200, line=9)] + PAGE_WORDS
         page = OCRResult(blocks=[], full_text="", engine="tesseract", metadata={"words": words})
-        result = refine_nid_fields(FakeEngine(), self.image, page, variant="best", workdir=self.workdir)
+        result = refine_nid_fields(None, self.image, page, variant="best", workdir=self.workdir, reader=FakeReader())
         self.assertEqual(result.full_text.splitlines()[0], "গণপ্রজাতন্ত্রী")
 
 
@@ -169,3 +171,88 @@ class NIDInkFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LineReaderTests(unittest.TestCase):
+    """The C API reader keeps one Tesseract handle per model+language for the whole process."""
+
+    @classmethod
+    def setUpClass(cls):
+        from nid_ocr_lab.engines import tesseract_capi as capi
+        from nid_ocr_lab.engines.tessdata import get_variant
+
+        if not capi.is_available() or not get_variant("system").model_path("eng").is_file():
+            raise unittest.SkipTest("libtesseract or the system eng model is not installed")
+        cls.datapath = get_variant("system").directory
+
+    def setUp(self):
+        from nid_ocr_lab.engines.tesseract_reader import close_handles
+
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(close_handles)
+        from PIL import ImageDraw, ImageFont
+
+        self.crop = Path(self.tmp.name) / "line.png"
+        image = Image.new("RGB", (420, 90), "white")
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 52)
+        except OSError:
+            font = ImageFont.load_default(size=52)
+        ImageDraw.Draw(image).text((20, 15), "AB 1234", fill="black", font=font)
+        image.save(self.crop, dpi=(300, 300))
+
+    def test_handles_are_reused_and_config_does_not_leak(self):
+        from nid_ocr_lab.engines.tesseract_reader import CApiLineReader
+
+        reader = CApiLineReader()
+        first = reader.handle(self.datapath, "eng")
+        self.assertIs(reader.handle(self.datapath, "eng")[0], first[0])  # same handle, no re-init
+
+        digits = reader.read(self.crop, self.datapath, ["eng"], 7, {"tessedit_char_whitelist": "0123456789"})
+        self.assertNotIn("A", digits.text)
+        self.assertIn("1234", digits.text)
+
+        # the whitelist must not survive into the next read on the same handle
+        plain = reader.read(self.crop, self.datapath, ["eng"], 7)
+        self.assertIn("AB", plain.text)
+        self.assertTrue(0 < (plain.confidence or 0) <= 1)
+
+
+class SecondLayoutTests(unittest.TestCase):
+    """Some NID cards print the label on its own line with the value underneath (no colon)."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.workdir = Path(self.tmp.name)
+        self.image = self.workdir / "card.png"
+        Image.new("RGB", (2590, 1632), "white").save(self.image)
+        words = []
+        rows = [("নাম", "আশিষ ঘোষ"), ("Name", "ASISH GHOSH"), ("পিতা", "গোকুল চন্দ্র ঘোষ"), ("মাতা", "বীনা পানি ঘোষ")]
+        for index, (label, value) in enumerate(rows):
+            top = 463 + index * 290
+            words.append(word(label, 822, top, 74, height=41, line=index * 2))
+            words.append(word(value, 824, top + 55, 200, height=92, line=index * 2 + 1))
+        # the date row sits below the four name rows and keeps its value on the same line
+        words.append(word("Date", 831, 1560, 90, height=68, line=8))
+        words.append(word("of", 930, 1560, 40, height=68, line=8))
+        words.append(word("Birth", 980, 1560, 90, height=68, line=8))
+        words.append(word("10 Dec 1989", 1180, 1560, 300, height=68, line=8))
+        self.page = OCRResult(blocks=[], full_text="", engine="tesseract", metadata={"words": words})
+
+    def test_value_on_the_next_line_is_used(self):
+        reader = FakeReader()  # no scripted re-reads, so the page values must win
+        result = refine_nid_fields(None, self.image, self.page, variant="best", workdir=self.workdir, reader=reader)
+        fields = {item["field"]: item for item in result.metadata["fields"]}
+        self.assertEqual(fields["name_bangla"]["text"], "আশিষ ঘোষ")
+        self.assertEqual(fields["mother_name_bangla"]["text"], "বীনা পানি ঘোষ")
+        self.assertEqual(fields["date_of_birth"]["text"], "10 Dec 1989")
+        # the value line is cropped, not the empty space right of the label
+        box = fields["father_name_bangla"]["box"]
+        self.assertGreater(box["y"], 1000)
+        self.assertLess(box["y"], 1110)
+        # value lines are not repeated as unmatched page lines
+        self.assertEqual(result.full_text.count("আশিষ ঘোষ"), 1)
+        parsed = NIDParser().parse(result)
+        self.assertEqual(parsed.father_name_bangla.raw_value, "গোকুল চন্দ্র ঘোষ")

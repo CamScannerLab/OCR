@@ -40,11 +40,12 @@ def save_filtered_image(
     output_path: str | Path,
     mode: str = "original",
     max_width: int | None = 1800,
+    rotation: int = 0,
 ) -> ImageInfo:
     image = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
     if max_width:
         image.thumbnail((max_width, max_width * 2), Image.Resampling.LANCZOS)
-    output = apply_filter(image, mode)
+    output = rotate_clockwise(apply_filter(image, mode), rotation)
     save_ocr_input(output, output_path)
     return ImageInfo(width=output.width, height=output.height, mode=mode)
 
@@ -110,12 +111,13 @@ def save_sdk_crop(
     mode: str = "original",
     target_aspect_ratio: float = 85.6 / 54.0,
     output_max_pixels: int = 2_000_000,
+    rotation: int = 0,
 ) -> ImageInfo:
     image = Image.open(image_path).convert("RGB")
     quad = order_quad(points)
     cropped = perspective_correct(image, quad, target_aspect_ratio=target_aspect_ratio)
     cropped = downscale_max_pixels(cropped, output_max_pixels)
-    output = apply_filter(cropped, mode)
+    output = rotate_clockwise(apply_filter(cropped, mode), rotation)
     save_ocr_input(output, output_path)
     return ImageInfo(width=output.width, height=output.height, mode=f"sdk_crop_{mode}")
 
